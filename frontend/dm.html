@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DM · Combate D&D 5e</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<div id="login-view" class="card-view">
+  <h1>Consola de DM</h1>
+  <p class="hp-text">Introduce la contraseña de DM para continuar.</p>
+  <form id="login-form">
+    <input id="login-pw" type="password" placeholder="Contraseña de DM" required autofocus>
+    <button type="submit" class="primary">Entrar</button>
+  </form>
+  <p id="login-error" class="error"></p>
+</div>
+
+<div id="main-view" class="hidden">
+
+<header class="topbar">
+  <div>
+    <div class="label">Código de sesión</div>
+    <div id="session-code" class="code">------</div>
+  </div>
+  <div style="text-align:right">
+    <div class="label">Ronda</div>
+    <div id="round" class="round">1</div>
+  </div>
+</header>
+
+<div id="banner" class="banner hidden"></div>
+
+<section class="panel">
+  <h2>Nuevo combatiente</h2>
+  <input id="f-monster-search" list="srd-monsters"
+         placeholder="Buscar monstruo SRD (opcional)…"
+         autocomplete="off" style="margin-bottom:8px">
+  <datalist id="srd-monsters"></datalist>
+  <input type="hidden" id="f-srd-index" value="">
+  <form id="add-form" class="grid-form">
+    <input id="f-name" placeholder="Nombre" maxlength="40" required>
+    <input id="f-hp" type="number" min="1" value="10" placeholder="HP max" required>
+    <input id="f-init" type="number" value="10" placeholder="Iniciativa" required>
+    <select id="f-kind">
+      <option value="enemy">Enemigo</option>
+      <option value="pc">PJ</option>
+    </select>
+    <button type="submit" class="primary">Añadir</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="row-actions">
+    <button id="btn-next-turn" class="primary">Siguiente turno ▶</button>
+    <button id="btn-next-round">Siguiente ronda ⏭</button>
+    <button id="btn-recover">Recuperar sesión</button>
+    <button id="btn-close" class="danger">Cerrar sesión</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Orden de iniciativa</h2>
+  <div id="combatants" class="combatants"></div>
+</section>
+
+<section class="panel">
+  <h2>Sesiones anteriores</h2>
+  <div class="row-actions" style="margin-bottom:10px">
+    <select id="log-selector" style="flex:1">
+      <option value="">— selecciona una sesión —</option>
+    </select>
+    <button id="btn-load-log">Ver log</button>
+  </div>
+  <pre id="log-view" class="log-view hidden"></pre>
+</section>
+
+</div><!-- #main-view -->
+
+<script src="/static/common.js"></script>
+<script src="/static/dm.js"></script>
+</body>
+</html>

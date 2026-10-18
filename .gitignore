@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Base de datos y estado de la app (NO versionar)
+data/*.db
+data/*.db-*
+data/*.db-journal
+data/logs/
+
+# Logs
+*.log
+
+# Backups de editor / IA
+*.bak
+*.swp
+*~
+.orig
+
+# Repomix: el output se regenera, el config sí se versiona
+repomix-output.*
+
+# Variables de entorno locales
+.env
+.env.*
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

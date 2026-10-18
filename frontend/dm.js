@@ -1,0 +1,310 @@
+const DM_TOKEN_KEY = "dnd_dm_token";
+const DM_PW_KEY = "dnd_dm_pw";  // sessionStorage: se borra al cerrar la pestaña
+const $ = (id) => document.getElementById(id);
+
+let state = null;
+let socket = null;
+let dmToken = localStorage.getItem(DM_TOKEN_KEY) || null;
+
+// ---------------- vista login / main
+
+function showLogin() {
+  $("login-view").classList.remove("hidden");
+  $("main-view").classList.add("hidden");
+  $("login-error").textContent = "";
+  setTimeout(() => $("login-pw").focus(), 50);
+}
+
+function showMain() {
+  $("login-view").classList.add("hidden");
+  $("main-view").classList.remove("hidden");
+}
+
+async function login(password) {
+  try {
+    const info = await API.post("/api/dm/bootstrap", { password });
+    dmToken = info.dm_token;
+    localStorage.setItem(DM_TOKEN_KEY, dmToken);
+    sessionStorage.setItem(DM_PW_KEY, password);
+    showMain();
+    if (socket) { socket.close(); socket = null; }
+    openSocket();
+    loadClosedSessions();
+  } catch (err) {
+    $("login-error").textContent = err.message;
+    showLogin();
+  }
+}
+
+// ---------------- websocket + render
+
+function openSocket() {
+  if (socket) socket.close();
+  socket = connectWS("dm", dmToken, (next) => {
+    state = next;
+    render();
+  });
+}
+
+function render() {
+  if (!state) return;
+  $("session-code").textContent = state.session.code;
+  $("round").textContent = state.session.round;
+
+  const active = state.session.status === "active";
+  const banner = $("banner");
+  banner.classList.toggle("hidden", active);
+  if (!active) banner.textContent = "Sesión cerrada. Pulsa «Nueva sesión» para empezar otra.";
+  $("btn-close").textContent = active ? "Cerrar sesión" : "Nueva sesión";
+
+  renderList();
+}
+
+function renderList() {
+  const container = $("combatants");
+  container.innerHTML = "";
+
+  if (!state.combatants.length) {
+    container.innerHTML = '<p class="hp-text">Aún no hay combatientes.</p>';
+    return;
+  }
+
+  const turnId = state.session.turn_combatant_id;
+  const players = state.players || [];
+
+  for (const c of state.combatants) {
+    const row = document.createElement("div");
+    row.className = "combatant";
+    if (c.id === turnId) row.classList.add("current");
+    if (c.dead) row.classList.add("dead");
+
+    const pct = c.hp_max > 0
+      ? Math.max(0, Math.min(100, (c.hp_current / c.hp_max) * 100))
+      : 0;
+
+    row.innerHTML = `
+      <div class="c-head">
+        <span class="init">${c.initiative}</span>
+        <span class="c-name">${escapeHtml(c.name)}</span>
+        <span class="tag ${c.kind}">${c.kind === "pc" ? "PJ" : "ENEMIGO"}</span>
+        ${c.id === turnId ? '<span class="turn-tag">TURNO</span>' : ""}
+      </div>
+      <div class="hpbar"><div class="hpfill" style="width:${pct}%"></div></div>
+      <div class="hp-text">${c.hp_current} / ${c.hp_max} HP${c.dead ? " · CAÍDO" : ""}</div>
+      <div class="c-actions">
+        <button class="dmg" data-hp="-10">−10</button>
+        <button class="dmg" data-hp="-5">−5</button>
+        <button class="dmg" data-hp="-1">−1</button>
+        <button class="heal" data-hp="1">+1</button>
+        <button class="heal" data-hp="5">+5</button>
+        <button class="heal" data-hp="10">+10</button>
+        <button data-undo="1" title="Deshacer último cambio de HP">↶</button>
+        <button class="danger small" data-remove="1">✕</button>
+      </div>
+      ${c.kind === "pc" ? `
+      <div class="c-link">
+        <span>Jugador:</span>
+        <select data-link="${c.id}">
+          <option value="">— sin vincular —</option>
+          ${players.map((p) =>
+            `<option value="${p.id}"${p.id === c.linked_player_id ? " selected" : ""}>${escapeHtml(p.name)}</option>`
+          ).join("")}
+        </select>
+      </div>` : ""}
+    `;
+
+    row.querySelectorAll("[data-hp]").forEach((btn) => {
+      btn.addEventListener("click", () => changeHp(c.id, Number(btn.dataset.hp)));
+    });
+    row.querySelector("[data-remove]").addEventListener("click", () => removeCombatant(c.id));
+    const undoBtn = row.querySelector("[data-undo]");
+    if (undoBtn) undoBtn.addEventListener("click", () => undoHp(c.id));
+    const select = row.querySelector("[data-link]");
+    if (select) {
+      select.addEventListener("change", () =>
+        linkPlayer(c.id, select.value ? Number(select.value) : null)
+      );
+    }
+
+    container.appendChild(row);
+  }
+}
+
+// ---------------- autocompletado SRD
+
+const monsterSearch = $("f-monster-search");
+const monsterDatalist = $("srd-monsters");
+const srdIndexInput = $("f-srd-index");
+let monsterSearchTimer = null;
+
+monsterSearch.addEventListener("input", () => {
+  const q = monsterSearch.value.trim();
+  clearTimeout(monsterSearchTimer);
+  if (q.length < 2) {
+    monsterDatalist.innerHTML = "";
+    return;
+  }
+  monsterSearchTimer = setTimeout(async () => {
+    try {
+      const data = await API.get(
+        `/api/srd/monsters?q=${encodeURIComponent(q)}&limit=20`
+      );
+      monsterDatalist.innerHTML = data.items
+        .map((m) => {
+          const dex = Number(m.dexterity) || 10;
+          return (
+            `<option value="${escapeHtml(m.name)}"` +
+            ` data-index="${escapeHtml(m.index)}"` +
+            ` data-hp="${m.hit_points}"` +
+            ` data-dex="${dex}"></option>`
+          );
+        })
+        .join("");
+    } catch (err) {
+      // Sin SRD importado el endpoint devuelve [] o falla en red:
+      // el datalist se queda vacío y el flujo manual sigue funcionando.
+      monsterDatalist.innerHTML = "";
+    }
+  }, 200);
+});
+
+// `change` se dispara al confirmar la opción del datalist (o al salir del
+// campo). Si el valor coincide EXACTAMENTE con una opción poblamos
+// los campos y marcamos `srd_index`. Si no coincide, limpiamos `srd_index`.
+monsterSearch.addEventListener("change", () => {
+  const val = monsterSearch.value.trim();
+  const opt = Array.from(monsterDatalist.options).find((o) => o.value === val);
+  if (!opt) {
+    srdIndexInput.value = "";
+    return;
+  }
+  srdIndexInput.value = opt.dataset.index || "";
+  $("f-name").value = opt.value;
+  $("f-hp").value = opt.dataset.hp || "1";
+  const dex = Number(opt.dataset.dex) || 10;
+  $("f-init").value = String(10 + Math.floor((dex - 10) / 2));
+});
+
+// ---------------- acciones
+
+async function changeHp(id, delta) {
+  try {
+    await API.post(`/api/combatants/${id}/hp`, { delta }, { "X-DM-Token": dmToken });
+  } catch (err) { toast(err.message); }
+}
+
+async function undoHp(id) {
+  try {
+    await API.post(`/api/combatants/${id}/undo-hp`, {}, { "X-DM-Token": dmToken });
+  } catch (err) { toast(err.message); }
+}
+
+async function removeCombatant(id) {
+  if (!confirm("¿Eliminar este combatiente?")) return;
+  try {
+    await API.del(`/api/combatants/${id}`, { "X-DM-Token": dmToken });
+  } catch (err) { toast(err.message); }
+}
+
+async function linkPlayer(cid, playerId) {
+  try {
+    await API.post(`/api/combatants/${cid}/link`, { player_id: playerId }, { "X-DM-Token": dmToken });
+  } catch (err) { toast(err.message); }
+}
+
+async function turnAction(path) {
+  try {
+    await API.post(path, {}, { "X-DM-Token": dmToken });
+  } catch (err) { toast(err.message); }
+}
+
+async function loadClosedSessions() {
+  if (!dmToken) return;
+  try {
+    const data = await API.get("/api/sessions/closed", { "X-DM-Token": dmToken });
+    const sel = $("log-selector");
+    sel.innerHTML = '<option value="">— selecciona una sesión —</option>';
+    for (const s of data.sessions) {
+      const opt = document.createElement("option");
+      opt.value = s.code;
+      opt.textContent = `${s.code} · ${s.closed_at || "?"} · ${s.n_events} eventos`;
+      sel.appendChild(opt);
+    }
+  } catch (err) { /* silencioso: no romper la UI */ }
+}
+
+// ---------------- listeners globales
+
+$("login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const pw = $("login-pw").value;
+  if (pw) login(pw);
+});
+
+$("add-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    name: $("f-name").value.trim(),
+    hp_max: Number($("f-hp").value) || 1,
+    initiative: Number($("f-init").value) || 0,
+    kind: $("f-kind").value,
+  };
+  const srdIdx = $("f-srd-index").value;
+  if (srdIdx) payload.srd_index = srdIdx;
+  if (!payload.name) return;
+  try {
+    await API.post("/api/combatants", payload, { "X-DM-Token": dmToken });
+    $("f-name").value = "";
+    $("f-monster-search").value = "";
+    $("f-srd-index").value = "";
+    $("f-name").focus();
+  } catch (err) { toast(err.message); }
+});
+
+$("btn-next-turn").addEventListener("click", () => turnAction("/api/turn/next"));
+$("btn-next-round").addEventListener("click", () => turnAction("/api/turn/round"));
+
+$("btn-recover").addEventListener("click", () => {
+  if (socket) { socket.close(); socket = null; }
+  showLogin();
+});
+
+$("btn-close").addEventListener("click", async () => {
+  if (state && state.session.status === "active") {
+    if (!confirm("¿Cerrar la sesión y guardar el log de eventos?")) return;
+    try {
+      const res = await API.post("/api/session/close", {}, { "X-DM-Token": dmToken });
+      toast("Log guardado en " + res.log);
+      loadClosedSessions();
+    } catch (err) { toast(err.message); }
+  } else {
+    const pw = sessionStorage.getItem(DM_PW_KEY);
+    if (!pw) { showLogin(); return; }
+    await login(pw);
+  }
+});
+
+$("btn-load-log").addEventListener("click", async () => {
+  const code = $("log-selector").value;
+  if (!code) { toast("Selecciona una sesión cerrada"); return; }
+  try {
+    const data = await API.get(
+      `/api/sessions/${encodeURIComponent(code)}/log`,
+      { "X-DM-Token": dmToken }
+    );
+    const pre = $("log-view");
+    pre.textContent = data.content;
+    pre.classList.remove("hidden");
+  } catch (err) { toast(err.message); }
+});
+
+// ---------------- init
+
+(async function init() {
+  const storedPw = sessionStorage.getItem(DM_PW_KEY);
+  if (storedPw) {
+    await login(storedPw);
+  } else {
+    showLogin();
+  }
+})();

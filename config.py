@@ -1,0 +1,21 @@
+"""Configuracion unica del MVP: puerto y ruta de la base de datos."""
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Puerto HTTP del servidor
+PORT = 8000
+
+# Ruta del archivo SQLite (se crea sola al arrancar)
+DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")
+
+
+# Contrasena de DM (CAMBIALA por la tuya).
+# Si queda vacia, /api/dm/bootstrap rechazara todas las peticiones.
+DM_PASSWORD = 'fyjjuk'
+
+
+# Directorio con los JSON del SRD 5e (2014) en espanol.
+# Lo usa scripts/import_srd.py. Si no existe, el servidor arranca igual
+# y el autocompletado del bestiario aparece vacio hasta que importes.
+SRD_DIR = "/home/fyjjuk/DnD/raw/srd-2014/es"

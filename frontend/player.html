@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jugador · Combate D&D 5e</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<div id="join-view" class="card-view">
+  <h1>Unirse al combate</h1>
+  <p class="hp-text">Pide el código de sesión a tu DM.</p>
+  <form id="join-form">
+    <input id="j-code" placeholder="Código (ej. K7M2QP)" maxlength="6" required
+           style="text-transform:uppercase;letter-spacing:.2em;text-align:center;font-weight:700">
+    <input id="j-name" placeholder="Tu nombre / nombre del PJ" maxlength="40" required>
+    <button type="submit" class="primary">Entrar</button>
+  </form>
+  <p id="join-error" class="error"></p>
+</div>
+
+<div id="combat-view" class="hidden">
+  <header class="topbar">
+    <div>
+      <div class="label">Sesión</div>
+      <div id="p-code" class="code">------</div>
+    </div>
+    <div style="text-align:right">
+      <div class="label">Ronda</div>
+      <div id="p-round" class="round">1</div>
+    </div>
+  </header>
+
+  <div id="p-turn" class="turn-banner">Esperando inicio del combate…</div>
+  <div id="p-me" class="me-panel"></div>
+
+  <section class="panel">
+    <h2>Orden de iniciativa</h2>
+    <div id="p-list" class="combatants"></div>
+  </section>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/player.js"></script>
+</body>
+</html>

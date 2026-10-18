@@ -1,0 +1,38 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "fileSummary": true,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "showLineNumbers": false
+  },
+  "include": [
+    "backend/**/*.py",
+    "frontend/**/*.html",
+    "frontend/**/*.js",
+    "frontend/**/*.css",
+    "scripts/**/*.py",
+    "config.py",
+    "run.py",
+    "requirements.txt",
+    "README.md"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "data/**",
+      ".venv/**",
+      "__pycache__/**",
+      "*.pyc",
+      "*.db",
+      "*.db-*",
+      "*.log",
+      "repomix-output.xml",
+      "repomix-output.*"
+    ]
+  }
+}
