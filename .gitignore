@@ -1,40 +1,32 @@
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
-*.egg-info/
+
+# Virtualenv
 .venv/
 venv/
-env/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
-# Base de datos y estado de la app (NO versionar)
-data/*.db
-data/*.db-*
-data/*.db-journal
-data/logs/
+# Backups de editor
+*.bak
+*~
+*.swp
 
-# Logs
+# Estado de runtime (DB, WAL, logs de sesión)
+data/
+*.db
+*.db-wal
+*.db-shm
 *.log
 
-# Backups de editor / IA
-*.bak
-*.swp
-*~
-.orig
-
-# Repomix: el output se regenera, el config sí se versiona
+# Salida de repomix (el config SÍ se trackea)
 repomix-output.*
 
-# Variables de entorno locales
+# Config local con secretos
 .env
 .env.*
 
-# Sistema
+# Basura de SO / IDE
 .DS_Store
 Thumbs.db
-
-# IDE
-.idea/
 .vscode/
+.idea/
