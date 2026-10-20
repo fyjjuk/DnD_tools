@@ -75,7 +75,7 @@ def list_campaigns_for_user(db, user_id: int):
     """Devuelve filas enriquecidas con role y n_sessions."""
     rows = db.execute(
         """
-        SELECT c.*, m.role AS role,
+        SELECT c.*, c.join_code AS join_code, m.role AS role,
                (SELECT COUNT(*) FROM sessions s WHERE s.campaign_id = c.id) AS n_sessions,
                (SELECT COUNT(*) FROM sessions s
                 WHERE s.campaign_id = c.id AND s.status='active') AS n_sessions_active

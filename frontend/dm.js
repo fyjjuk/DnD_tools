@@ -43,6 +43,11 @@ function openSocket() {
   socket = connectWS("dm", dmToken, (next) => {
     state = next;
     render();
+  }, () => {
+    // FIX I3: WS 4003 = dm_token invalido/caducado. Limpiar y redirigir
+    // al login en vez de entrar en bucle de reconexion.
+    localStorage.removeItem(DM_TOKEN_KEY);
+    window.location.href = "/dm-login";
   });
 }
 

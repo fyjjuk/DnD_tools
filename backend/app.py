@@ -216,7 +216,7 @@ async def dm_bootstrap(payload: Optional[BootstrapIn] = None):
     Requiere DM_PASSWORD correcta (config.py)."""
     password = payload.password if payload else ""
     if not getattr(config, "DM_PASSWORD", ""):
-        raise HTTPException(status_code=500, detail="DM_PASSWORD no configurada en config.py")
+        raise HTTPException(status_code=500, detail="DM_PASSWORD no configurada. Exporta DND_DM_PASSWORD o ejecuta python -m backend.set_dm_password")
     if password != config.DM_PASSWORD:
         raise HTTPException(status_code=403, detail="Contrasena de DM incorrecta")
 
@@ -778,18 +778,26 @@ async def websocket_endpoint(websocket: WebSocket, role: str = "player", token: 
         if role == "dm":
             session = fetch_active_session(db)
             if session is None or session["dm_token"] != token:
+                # FIX I3: accept() antes de close() para que el cliente
+                # reciba un close frame WS con code=4003. Si se cierra
+                # antes de accept(), Starlette/Uvicorn lo convierte en
+                # HTTP 403 handshake rejection y el browser ve code=1006
+                # (abnormal closure), rompiendo onAuthError de common.js.
+                await websocket.accept()
                 await websocket.close(code=4003)
                 return
             session_id, player_id = session["id"], None
         else:
             player = db.execute("SELECT * FROM players WHERE token=?", (token,)).fetchone()
             if player is None:
+                await websocket.accept()
                 await websocket.close(code=4003)
                 return
             session = db.execute(
                 "SELECT * FROM sessions WHERE id=?", (player["session_id"],)
             ).fetchone()
             if session is None:
+                await websocket.accept()
                 await websocket.close(code=4003)
                 return
             session_id, player_id = session["id"], player["id"]
@@ -1006,6 +1014,7 @@ async def campaigns_list(x_user_token: Optional[str] = Header(None)):
                 "status": r["status"],
                 "n_sessions": r["n_sessions"],
                 "n_sessions_active": r["n_sessions_active"],
+                "join_code": r["join_code"],
             }
             for r in rows
         ]
@@ -1154,25 +1163,43 @@ async def campaigns_join_player(campaign_id: int,
         if sess is None:
             raise ApiError(404, "no hay sesion activa en esta campana", "NOT_FOUND")
 
+        # FIX I2: identidad por user_id. El player de una cuenta en esta
+        # sesion es el que tiene su user_token en user_sessions (bridge v2:
+        # user_sessions.token == players.token). NO se busca por display_name.
         existing = db.execute(
-            "SELECT * FROM players WHERE session_id=? AND lower(name)=lower(?)",
-            (sess["id"], user["display_name"]),
+            "SELECT p.* FROM players p "
+            "JOIN user_sessions us ON us.token = p.token "
+            "WHERE p.session_id=? AND us.user_id=? "
+            "ORDER BY p.id DESC LIMIT 1",
+            (sess["id"], user["id"]),
         ).fetchone()
         if existing:
             player = existing
         else:
+            # FIX I2: si ya hay otro player con el mismo display_name en esta
+            # sesion (otra cuenta homonima), desambiguar con username.
+            name = user["display_name"]
+            clash = db.execute(
+                "SELECT 1 FROM players WHERE session_id=? AND lower(name)=lower(?)",
+                (sess["id"], name),
+            ).fetchone()
+            if clash:
+                name = f"{user['display_name']} ({user['username']})"
             token = secrets.token_urlsafe(24)
             cur = db.execute(
                 "INSERT INTO players (session_id, name, token, created_at) "
                 "VALUES (?,?,?,?)",
-                (sess["id"], user["display_name"], token, now()),
+                (sess["id"], name, token, now()),
             )
             player = db.execute(
                 "SELECT * FROM players WHERE id=?", (cur.lastrowid,)
             ).fetchone()
-            log_event(db, sess["id"], "player",
-                      f"{user['display_name']} se unio (cuenta)")
+            log_event(db, sess["id"], "player", f"{name} se unio (cuenta)")
 
+        # FIX I1: registrar user_sessions para este player_token. Asi
+        # add_combatant y link_player (que buscan por user_sessions.token)
+        # encuentran el user_id y combatants.user_id queda consistente.
+        ensure_user_session(db, user["id"], player["token"], now())
         db.execute(
             "INSERT OR IGNORE INTO session_participants "
             "(session_id, user_id, joined_at) VALUES (?,?,?)",
@@ -1182,7 +1209,7 @@ async def campaigns_join_player(campaign_id: int,
             "UPDATE combatants SET player_id=?, user_id=? "
             "WHERE session_id=? AND kind='pc' AND player_id IS NULL "
             "AND lower(name)=lower(?)",
-            (player["id"], user["id"], sess["id"], user["display_name"]),
+            (player["id"], user["id"], sess["id"], player["name"]),
         )
         sid = sess["id"]
     await broadcast_state(sid)

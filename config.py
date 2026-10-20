@@ -16,7 +16,7 @@ DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")
 # de entorno DND_DM_PASSWORD o con el script set_dm_password.py:
 #   DND_DM_PASSWORD='tu-clave' python run.py
 #   python -m backend.set_dm_password
-DM_PASSWORD = os.getenv('DND_DM_PASSWORD', '')
+DM_PASSWORD = os.getenv("DND_DM_PASSWORD", "")
 
 
 # Directorio con los JSON del SRD 5e (2014) en espanol.

@@ -25,7 +25,7 @@ const API = {
   },
 };
 
-function connectWS(role, token, onState) {
+function connectWS(role, token, onState, onAuthError) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const url = `${proto}://${location.host}/ws?role=${encodeURIComponent(role)}&token=${encodeURIComponent(token)}`;
   let socket = null;
@@ -40,8 +40,16 @@ function connectWS(role, token, onState) {
       try { data = JSON.parse(event.data); } catch (e) { return; }
       if (data.type === "state") onState(data);
     };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (stopped) return;
+      // FIX I3: WS 4003 = token invalido/caducado (dm_token o player_token).
+      // Si el caller paso onAuthError, delegamos la limpieza + redireccion
+      // y NO reintentamos (evita el bucle de reconexion).
+      if (event && event.code === 4003 && typeof onAuthError === "function") {
+        stopped = true;
+        onAuthError();
+        return;
+      }
       setTimeout(open, delay);
       delay = Math.min(delay * 1.6, 5000);
     };

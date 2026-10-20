@@ -40,6 +40,16 @@ function openSocket() {
   socket = connectWS("player", playerToken, (next) => {
     state = next;
     render();
+  }, () => {
+    // FIX I3: WS 4003 = player_token invalido/caducado. Limpiar; si hay
+    // user_token (cuenta) volver a /campaigns, si no (guest) al join.
+    localStorage.removeItem(TOKEN_KEY);
+    playerToken = null;
+    if (localStorage.getItem("dnd_user_token")) {
+      window.location.href = "/campaigns";
+    } else {
+      showJoin();
+    }
   });
 }
 

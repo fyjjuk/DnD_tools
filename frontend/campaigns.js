@@ -54,18 +54,10 @@ async function loadCampaigns() {
     list.innerHTML = '<p class="muted">No tienes campañas todavía.</p>';
     return;
   }
-  // Fase 2.1.1 — El listado no expone join_code; lo pedimos por tarjeta.
-  const enriched = await Promise.all(data.items.map(async (c) => {
-    try {
-      const d = await api("/api/campaigns/" + c.id);
-      c.join_code = d && d.join_code;
-    } catch (e) {
-      c.join_code = null;
-    }
-    return c;
-  }));
+  // FIX I4: join_code ya viene en el listado (/api/campaigns).
+  // Sin N+1: no se hace fetch por tarjeta.
   list.innerHTML = "";
-  for (const c of enriched) {
+  for (const c of data.items) {
     list.appendChild(renderCampaign(c));
   }
 }
