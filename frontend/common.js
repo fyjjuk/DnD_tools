@@ -78,3 +78,33 @@ function toast(message) {
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.add("hidden"), 3200);
 }
+
+// FIX B2: copiar al portapapeles con fallback para HTTP LAN.
+// navigator.clipboard solo existe en contexto seguro (HTTPS o
+// localhost); en http://192.168.x.x hay que recurrir a execCommand.
+// Devuelve Promise<boolean>. No lanza: false si no se pudo copiar.
+async function copyToClipboard(text) {
+  // Camino 1: Clipboard API (HTTPS o localhost)
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* cae al fallback */ }
+  // Camino 2: textarea + execCommand
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    ta.style.pointerEvents = "none";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}

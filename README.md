@@ -36,19 +36,44 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 
 ## Averiguar la IP de la laptop
 
+La app está pensada para LAN doméstica con **DHCP**: la IP cambia cuando te
+conectas a otra red o cuando el router renueva la concesión. No la
+memorices; la propia app la muestra en el panel **Compartir** de
+`/campaigns` y en el botón **Compartir** de `/dm`.
+
+Si aun así la necesitas a mano:
+
 ```bash
 ip -4 addr show scope global | grep inet
 ```
 
-En este equipo es 192.168.1.34.
+La primera IPv4 (típicamente `192.168.x.x` o `10.x.x.x`) es la que sirve
+la app.
 
 ## Conectarse
 
-| Quién   | URL                              |
-|---------|----------------------------------|
-| DM      | http://192.168.1.34:8000/dm      |
-| Jugador | http://192.168.1.34:8000/player  |
-| Ambos   | http://192.168.1.34:8000/        |
+La URL depende de la IP de la laptop en cada red (DHCP). Para no teclearla:
+
+1. Desde la laptop, abre `/campaigns` y pulsa **Compartir** en la tarjeta
+   de tu campaña. Si estás dentro de `/dm`, pulsa **Compartir** en la
+   barra superior (misma información, en un modal).
+2. En el panel verás la URL actual, un botón **Copiar URL**, el código
+   de campaña y un **QR**.
+3. El jugador **escanea el QR con el móvil sin teclear nada** (o recibe
+   la URL por el canal que uses, p. ej. WhatsApp) y la abre. El campo
+   *Unirse por código* llega ya prellenado con el código de la campaña
+   (`?code=XXXXXX`).
+4. Si el jugador prefiere el flujo legacy sin cuenta, comparte el
+   **código de sesión** que aparece en `/dm` y pídele que entre por
+   `/player`.
+
+Rutas fijas (solo cambia el host, no el path):
+
+| Quién             | Ruta           |
+|-------------------|----------------|
+| DM                | `/dm`          |
+| Jugador legacy    | `/player`      |
+| Cuenta y campañas | `/login`, `/register`, `/campaigns` |
 
 ## Acceso con cuenta (Fase 2.1)
 
@@ -84,7 +109,7 @@ enruta al inicio, no cambia el combate).
 ### DM recovery con contrasena
 
 Si has perdido el acceso a la cuenta del DM, abre `/dm-login` e
-introduce la contrasena de DM (`config.py: DM_PASSWORD`). El
+introduce la contrasena de DM (`DND_DM_PASSWORD`). El
 formulario llama a `/api/dm/bootstrap`, guarda el `dm_token` y
 redirige a `/dm`.
 
@@ -93,16 +118,18 @@ desde `/dm` (cuando no hay token en localStorage).
 
 ### Reset de la contrasena del user `dm`
 
-Si cambias `DM_PASSWORD` en `config.py` y quieres que el login por
-cuenta (`/login` como usuario `dm`) acepte la nueva contrasena,
-ejecuta con el servidor parado:
+Si cambias `DND_DM_PASSWORD` o ejecutas `set_dm_password` y quieres
+que el login por cuenta (`/login` como usuario `dm`) acepte la nueva
+contrasena, ejecuta con el servidor parado:
 
 ```bash
 python -m backend.reset_dm_password
+# o si quieres resetear directamente desde la DB:
+python -m backend.set_dm_password
 ```
 
 El flujo legacy `/api/dm/bootstrap` **no** necesita este script:
-lee `DM_PASSWORD` de `config.py` en cada request.
+lee `DND_DM_PASSWORD` del entorno en cada request.
 
 ## Flujo de uso
 
@@ -140,11 +167,27 @@ Todo en un único archivo: `config.py`
 ```python
 PORT = 8000                                          # puerto HTTP
 DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")   # ruta SQLite
-DM_PASSWORD = "cambiar-esta-clave"                   # obligatoria
 ```
 
-`DM_PASSWORD` es la contraseña que protege la consola del DM. `/api/dm/bootstrap` ya no devuelve el `dm_token` sin autenticación: ahora exige `{password}` que coincida con `DM_PASSWORD`. En el navegador del DM, la primera visita muestra un formulario de contraseña; tras entrar, la contraseña queda en `sessionStorage` (se borra al cerrar la pestaña) y el `dm_token` en `localStorage`.
+### Contraseña de DM
 
+La contraseña de recovery DM **NO** va en el repo. Se configura con
+la variable de entorno `DND_DM_PASSWORD` o con el script:
+
+```
+DND_DM_PASSWORD='tu-clave' python run.py
+# o:
+python -m backend.set_dm_password
+```
+
+Sin `DM_PASSWORD` configurada, `/dm-login` devuelve 500 con mensaje
+claro. El registro con `username='dm'` está reservado (409).
+
+`DM_PASSWORD` protege la consola del DM. `/api/dm/bootstrap` exige
+`{password}` que coincida con `DM_PASSWORD`. En el navegador del DM,
+la primera visita muestra un formulario de contraseña; tras entrar,
+la contraseña queda en `sessionStorage` (se borra al cerrar la
+pestaña) y el `dm_token` en `localStorage`.
 
 ## Bestiario SRD (Fase 1)
 
@@ -309,6 +352,34 @@ WS     /ws?role=dm&token=...  |  /ws?role=player&token=...
 
 - **"Tu PJ no está en el combate"**: el DM debe crear un combatiente de tipo
   PJ con tu nombre exacto, o vincularlo manualmente.
+
+## Tests E2E (dev-only)
+
+Los tests end-to-end de la Fase 2.1 requieren Selenium y un Chrome/Chromium
+instalado. **No** van a producción; instálalos solo en el venv de
+desarrollo:
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+```
+
+Arranca el servidor en otra terminal:
+
+```bash
+python run.py
+```
+
+Y ejecuta:
+
+```bash
+python scripts/test_e2e_fase_2_1.py            # headless
+python scripts/test_e2e_fase_2_1.py --headful  # ver el navegador
+```
+
+El script cierra al inicio cualquier sesión huérfana (`status='active'`
+antigua) para poder re-ejecutarse sin reiniciar el servidor. Al terminar
+imprime `N/M PASS` y sale con código != 0 si algún check falla.
 
 ## Limitaciones conocidas (a propósito)
 

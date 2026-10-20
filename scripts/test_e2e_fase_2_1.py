@@ -45,6 +45,23 @@ except ImportError:
 
 import config
 
+
+def setUpModule():
+    """Cierra sesiones activas para que el E2E sea re-ejecutable."""
+    import datetime
+    from backend.db import get_db
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT id, code FROM sessions WHERE status='active'"
+        ).fetchall()
+        for r in rows:
+            db.execute(
+                "UPDATE sessions SET status='closed', closed_at=? WHERE id=?",
+                (datetime.datetime.now().isoformat(timespec='seconds'), r["id"]),
+            )
+            print(f"E2E: cerrada sesión huérfana {r['code']}")
+
+
 BASE = "http://127.0.0.1:8000"
 DM_PW = getattr(config, "DM_PASSWORD", "") or ""
 SUFFIX = str(int(time.time()))
@@ -342,6 +359,10 @@ def main():
     if not DM_PW:
         print("ERROR: DM_PASSWORD vacia en config.py")
         return 2
+
+    # Fase 2.1.1: cerrar sesiones huérfanas antes de empezar.
+    setUpModule()
+
     if not preflight():
         return 2
 

@@ -88,3 +88,9 @@
 .campaign-sessions { margin-top: 10px; }
 .sessions-list { margin: 0; padding-left: 18px; font-size: 13px; }
 .sessions-list li { margin: 2px 0; }
+
+/* Fase 2.1.1 — Compartir sesion */
+.share-url { display: flex; flex-direction: column; }
+.share-url input { font-family: ui-monospace, monospace; font-size: 13px; }
+.share-qr img { display: block; margin: 0 auto; }
+.share-code .code { color: var(--accent); font-family: ui-monospace, monospace; }

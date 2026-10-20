@@ -26,6 +26,7 @@
     <div id="session-code" class="code">------</div>
   </div>
   <div style="text-align:right">
+    <button id="btn-share" class="small" type="button">Compartir</button>
     <div class="label">Ronda</div>
     <div id="round" class="round">1</div>
   </div>
@@ -81,6 +82,16 @@
 
 <div id="dm-redirect" class="hidden">
   Redirigiendo… <a href="/dm-login">Ir a login</a>
+</div>
+
+<div id="share-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:420px;width:100%">
+    <h2 style="margin:0 0 10px">Compartir sesión</h2>
+    <div id="share-modal-content"><p class="hp-text">Cargando...</p></div>
+    <div class="row-actions" style="margin-top:12px">
+      <button id="btn-share-close" type="button">Cerrar</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/common.js"></script>

@@ -298,6 +298,53 @@ $("btn-load-log").addEventListener("click", async () => {
   } catch (err) { toast(err.message); }
 });
 
+// ---------------- Compartir sesión (Fase 2.1.1)
+
+$("btn-share").addEventListener("click", async () => {
+  $("share-modal").classList.remove("hidden");
+  const content = $("share-modal-content");
+  content.innerHTML = '<p class="hp-text">Cargando...</p>';
+  try {
+    const info = await API.get("/api/network-info");
+    const ip = (info.ips && info.ips[0]) || "sin-ip";
+    // FIX B1: si la sesion pertenece a una campana, meter ?code= en la URL
+    // para que el QR (y el portapapeles) lleven el jugador directo con el
+    // codigo prellenado. Sesion legacy -> sin query + aviso en el modal.
+    const joinCode = state && state.session && state.session.campaign_join_code;
+    const url = joinCode
+      ? `http://${ip}:${info.port}/campaigns?code=${encodeURIComponent(joinCode)}`
+      : `http://${ip}:${info.port}/campaigns`;
+    const sessionCode = state && state.session && state.session.code;
+    content.innerHTML = `
+      <div class="share-url" style="margin-bottom:10px">
+        <div class="label">URL para jugadores</div>
+        <input readonly value="${escapeHtml(url)}" style="width:100%;margin-top:4px">
+        <button class="small" data-copy="${escapeHtml(url)}" style="margin-top:6px">Copiar URL</button>
+      </div>
+      <div class="share-qr" style="text-align:center;margin:10px 0">
+        <img src="/api/qr.svg?data=${encodeURIComponent(url)}" alt="QR" style="max-width:240px;background:#fff;padding:8px;border-radius:6px">
+      </div>
+      ${joinCode ? `<div class="share-code" style="margin-top:10px"><div class="label">Código de campaña</div><div class="code" style="font-size:22px">${escapeHtml(joinCode)}</div></div>` : ""}
+      ${sessionCode ? `<div class="share-code" style="margin-top:10px"><div class="label">Código de sesión (legacy)</div><div class="code" style="font-size:22px">${escapeHtml(sessionCode)}</div></div>` : ""}
+      ${!joinCode ? '<p class="hp-text" style="margin-top:10px">Sesión sin campaña asociada. Solo código de sesión disponible.</p>' : ""}
+    `;
+    content.querySelectorAll("[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        // FIX B2: copyToClipboard tiene fallback para HTTP LAN.
+        copyToClipboard(btn.dataset.copy).then((ok) => {
+          if (ok) { toast("Copiado"); }
+          else { toast("No se pudo copiar. Selecciona el texto manualmente."); }
+        });
+      });
+    });
+  } catch (e) {
+    content.innerHTML = `<p class="error">Error: ${escapeHtml(e.message)}</p>`;
+  }
+});
+$("btn-share-close").addEventListener("click", () => {
+  $("share-modal").classList.add("hidden");
+});
+
 // ---------------- init
 
 (async function init() {

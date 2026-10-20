@@ -88,11 +88,38 @@ def ensure_user_session(db, user_id: int, token: str, created_at: str) -> None:
 
 
 def ensure_dm_user(db) -> int:
-    """Devuelve el id del user 'dm', creandolo si no existe."""
-    row = db.execute("SELECT id FROM users WHERE username='dm'").fetchone()
-    if row is not None:
-        return row["id"]
+    """Devuelve el id del user 'dm'.
+
+    FIX B3: si el user 'dm' ya existe, valida que sea coherente:
+      - is_guest == 0
+      - password_hash no vacio y valida contra config.DM_PASSWORD
+    Si no es coherente, lanza ApiError(500, DM_USER_INCONSISTENT).
+    Esto evita que un usuario malicioso registre username='dm' antes
+    que el DM real y luego sea adoptado por ensure_dm_user.
+
+    Si no existe, lo crea con hash de config.DM_PASSWORD (o NULL si
+    la env no esta configurada — en ese caso, el flujo de bootstrap
+    ya falla antes por el check de DM_PASSWORD vacia).
+    """
     import config
+    row = db.execute(
+        "SELECT id, is_guest, password_hash FROM users WHERE username='dm'"
+    ).fetchone()
+    if row is not None:
+        pw = getattr(config, "DM_PASSWORD", "") or ""
+        coherent = (
+            row["is_guest"] == 0
+            and bool(row["password_hash"])
+            and bool(pw)
+            and verify_password(pw, row["password_hash"])
+        )
+        if coherent:
+            return row["id"]
+        raise ApiError(
+            500,
+            "user dm inconsistente, contacta al operador",
+            "DM_USER_INCONSISTENT",
+        )
     password = getattr(config, "DM_PASSWORD", "") or ""
     pw_hash = hash_password(password) if password else None
     cur = db.execute(

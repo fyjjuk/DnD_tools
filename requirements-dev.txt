@@ -1,0 +1,4 @@
+# Solo para correr los scripts E2E en scripts/. No va a producción.
+# Uso: pip install -r requirements-dev.txt
+#      python scripts/test_e2e_fase_2_1.py
+selenium

@@ -3,6 +3,15 @@ const $ = (id) => document.getElementById(id);
 
 function token() { return localStorage.getItem(TOKEN_KEY); }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function setMsg(text, isError) {
   const el = $("msg");
   el.hidden = false;
@@ -45,8 +54,18 @@ async function loadCampaigns() {
     list.innerHTML = '<p class="muted">No tienes campañas todavía.</p>';
     return;
   }
+  // Fase 2.1.1 — El listado no expone join_code; lo pedimos por tarjeta.
+  const enriched = await Promise.all(data.items.map(async (c) => {
+    try {
+      const d = await api("/api/campaigns/" + c.id);
+      c.join_code = d && d.join_code;
+    } catch (e) {
+      c.join_code = null;
+    }
+    return c;
+  }));
   list.innerHTML = "";
-  for (const c of data.items) {
+  for (const c of enriched) {
     list.appendChild(renderCampaign(c));
   }
 }
@@ -67,6 +86,7 @@ function renderCampaign(c) {
   let meta = "rol: " + c.role + " · " + c.status + " · " +
              c.n_sessions + " sesiones";
   if (hasActive) meta += " · sesión activa";
+  if (c.join_code) meta += " · código " + c.join_code;
   head.querySelector(".campaign-meta").textContent = meta;
 
   const actions = head.querySelector(".row-actions");
@@ -138,6 +158,65 @@ function renderCampaign(c) {
   panel.className = "campaign-sessions";
   panel.hidden = true;
 
+  const shareActions = document.createElement("div");
+  shareActions.style.marginTop = "10px";
+
+  const btnShare = document.createElement("button");
+  btnShare.type = "button";
+  btnShare.className = "small";
+  btnShare.textContent = "Compartir";
+  shareActions.appendChild(btnShare);
+
+  const sharePanel = document.createElement("div");
+  sharePanel.className = "share-panel";
+  sharePanel.hidden = true;
+  sharePanel.style.marginTop = "8px";
+
+  btnShare.addEventListener("click", async () => {
+    sharePanel.hidden = !sharePanel.hidden;
+    if (sharePanel.hidden) return;
+    sharePanel.innerHTML = '<p class="muted">Cargando…</p>';
+    if (!c.join_code) {
+      sharePanel.innerHTML =
+        '<p class="muted">Esta campaña no tiene join_code.</p>';
+      return;
+    }
+    try {
+      const res = await fetch("/api/network-info");
+      const info = await res.json();
+      const ip = (info.ips && info.ips[0]) || "sin-ip";
+      const shareUrl = "http://" + ip + ":" + info.port +
+                       "/campaigns?code=" + c.join_code;
+      sharePanel.innerHTML =
+        '<div class="share-url">' +
+          '<input readonly value="' + escapeHtml(shareUrl) + '">' +
+          '<button class="small" data-copy="' + escapeHtml(shareUrl) +
+            '" style="margin-top:6px">Copiar URL</button>' +
+        '</div>' +
+        '<div class="share-code" style="margin-top:8px">Código: ' +
+          '<code class="code">' + escapeHtml(c.join_code) + '</code> ' +
+          '<button class="small" data-copy="' + escapeHtml(c.join_code) +
+            '">Copiar</button>' +
+        '</div>' +
+        '<div class="share-qr" style="margin-top:8px">' +
+          '<img src="/api/qr.svg?data=' + encodeURIComponent(shareUrl) +
+            '" alt="QR" style="max-width:220px">' +
+        '</div>';
+      sharePanel.querySelectorAll("[data-copy]").forEach((b) => {
+        b.addEventListener("click", () => {
+          // FIX B2: copyToClipboard (common.js) tiene fallback para HTTP LAN.
+          copyToClipboard(b.dataset.copy).then((ok) => {
+            if (ok) { setMsg("Copiado", false); }
+            else { setMsg("No se pudo copiar. Selecciona el texto manualmente.", true); }
+          });
+        });
+      });
+    } catch (e) {
+      sharePanel.innerHTML =
+        '<p class="error">Error: ' + escapeHtml(e.message) + '</p>';
+    }
+  });
+
   btnToggle.addEventListener("click", async () => {
     panel.hidden = !panel.hidden;
     if (panel.hidden) return;
@@ -151,6 +230,8 @@ function renderCampaign(c) {
 
   card.appendChild(head);
   card.appendChild(panel);
+  card.appendChild(shareActions);
+  card.appendChild(sharePanel);
   return card;
 }
 
@@ -236,5 +317,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadCampaigns();
   } catch (e) {
     setMsg("Error: " + e.message, true);
+  }
+});
+
+// Fase 2.1.1 — Prefill de "Unirse por código" desde ?code=XXXXXX
+document.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(window.location.search);
+  const preCode = params.get("code");
+  if (preCode) {
+    const input = document.getElementById("join-code");
+    if (input) {
+      input.value = preCode.toUpperCase().slice(0, 6);
+      input.focus();
+    }
   }
 });

@@ -10,9 +10,13 @@ PORT = 8000
 DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")
 
 
-# Contrasena de DM (CAMBIALA por la tuya).
-# Si queda vacia, /api/dm/bootstrap rechazara todas las peticiones.
-DM_PASSWORD = 'fyjjuk'
+# Contrasena de DM.
+# DM_PASSWORD: si vacia, /api/dm/bootstrap y /api/auth/login con
+# username='dm' fallan con error claro. Configurala con la variable
+# de entorno DND_DM_PASSWORD o con el script set_dm_password.py:
+#   DND_DM_PASSWORD='tu-clave' python run.py
+#   python -m backend.set_dm_password
+DM_PASSWORD = os.getenv('DND_DM_PASSWORD', '')
 
 
 # Directorio con los JSON del SRD 5e (2014) en espanol.

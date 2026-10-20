@@ -1,16 +1,19 @@
 """API REST + WebSocket del MVP de combate D&D 5e."""
 import datetime
+import io
 import json
 import os
 import re
 import secrets
+import socket
 import sqlite3
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import segno
 
 import config
 from backend.db import get_db, init_db
@@ -129,6 +132,21 @@ def build_state(session, combatants, players, role, player_id):
             "hp_current": c["hp_current"] if show_hp else None,
             "hp_max": c["hp_max"] if show_hp else None,
         })
+    # FIX B1: incluir campaign_id + campaign_join_code en state.session
+    # para que el modal Compartir de /dm pueda construir la URL con
+    # ?code=XXXXXX y el QR lo lleve. Ambos son nullable (sesiones legacy
+    # con campaign_id=NULL). No rompe el contrato: solo AÑADE campos.
+    campaign_id = None
+    campaign_join_code = None
+    keys = session.keys()
+    if "campaign_id" in keys and session["campaign_id"] is not None:
+        campaign_id = session["campaign_id"]
+        with get_db() as db:
+            row = db.execute(
+                "SELECT join_code FROM campaigns WHERE id=?", (campaign_id,)
+            ).fetchone()
+            if row is not None:
+                campaign_join_code = row["join_code"]
     return {
         "type": "state",
         "session": {
@@ -136,6 +154,8 @@ def build_state(session, combatants, players, role, player_id):
             "status": session["status"],
             "round": session["round"],
             "turn_combatant_id": session["turn_combatant_id"],
+            "campaign_id": campaign_id,
+            "campaign_join_code": campaign_join_code,
         },
         "combatants": out,
         "players": [{"id": p["id"], "name": p["name"]} for p in players],
@@ -874,6 +894,11 @@ async def auth_register(payload: RegisterIn):
     username = (payload.username or "").strip()
     password = payload.password or ""
     display_name = (payload.display_name or "").strip()
+    # FIX B3: 'dm' reservado. El check va ANTES de USERNAME_RE para que el
+    # cliente reciba 409 USERNAME_RESERVED (no 400 INVALID_INPUT: 'dm'
+    # tiene 2 chars y la regex exige 3-32).
+    if username == "dm":
+        raise ApiError(409, "username reservado", "USERNAME_RESERVED")
     if not USERNAME_RE.match(username):
         raise ApiError(400, "username invalido (3-32, [a-z0-9_-])", "INVALID_INPUT")
     if len(password) < 8:
@@ -1202,6 +1227,73 @@ async def favicon():
         'font-weight="800" text-anchor="middle" fill="#191d27">d20</text>'
         '</svg>'
     )
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+# ============================================================================
+# Fase 2.1.1 — Compartir sesion: IP dinamica + QR
+# ============================================================================
+
+def get_lan_ips():
+    """IPv4s no-loopback, no-link-local. Orden preferente:
+    192.168.* > 10.* > 172.* > resto. Deterministico."""
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ips.add(info[4][0])
+    except socket.gaierror:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ips.add(s.getsockname()[0])
+        finally:
+            s.close()
+    except OSError:
+        pass
+
+    result = []
+    for ip in ips:
+        if ":" in ip:
+            continue
+        if ip.startswith("127."):
+            continue
+        if ip.startswith("169.254."):
+            continue
+        result.append(ip)
+
+    def score(ip):
+        if ip.startswith("192.168."):
+            return (0, ip)
+        if ip.startswith("10."):
+            return (1, ip)
+        if ip.startswith("172."):
+            return (2, ip)
+        return (3, ip)
+
+    return sorted(result, key=score)
+
+
+@app.get("/api/network-info")
+async def network_info():
+    """IPv4s de la LAN + puerto. Sin auth (la IP ya es publica en LAN)."""
+    ips = get_lan_ips()
+    port = config.PORT
+    urls = [f"http://{ip}:{port}" for ip in ips]
+    return {"ips": ips, "port": port, "urls": urls}
+
+
+@app.get("/api/qr.svg")
+async def qr_svg(request: Request):
+    """Genera QR SVG para `data` (1-500 chars). Sin auth."""
+    data = request.query_params.get("data", "").strip()
+    if not data or len(data) > 500:
+        raise ApiError(400, "data invalido (1-500 chars)", "INVALID_INPUT")
+    qr = segno.make(data, error="m")
+    buf = io.BytesIO()
+    qr.save(buf, kind="svg", scale=6, border=2)
+    svg = buf.getvalue().decode("utf-8")
     return Response(content=svg, media_type="image/svg+xml")
 
 
