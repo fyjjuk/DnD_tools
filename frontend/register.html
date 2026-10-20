@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registro · DnD Campaigns</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<div class="auth-card">
+  <h1>Crear cuenta</h1>
+  <p class="muted">Regístrate para gestionar tus campañas.</p>
+  <form id="register-form" class="auth-form" autocomplete="off">
+    <label>Usuario
+      <input id="f-username" type="text" required minlength="3" maxlength="32"
+             pattern="[a-z0-9_-]{3,32}" autocomplete="username"
+             placeholder="3-32, solo a-z 0-9 _ -">
+    </label>
+    <label>Contraseña
+      <input id="f-password" type="password" required minlength="8"
+             autocomplete="new-password" placeholder="mínimo 8">
+    </label>
+    <label>Nombre visible
+      <input id="f-display" type="text" required maxlength="40"
+             placeholder="cómo te verán los demás">
+    </label>
+    <button class="primary" type="submit" id="btn-submit">Crear cuenta</button>
+  </form>
+  <p id="msg" class="auth-msg" hidden></p>
+  <p class="auth-footer">¿Ya tienes cuenta? <a href="/login">Inicia sesión</a></p>
+</div>
+<script src="/static/register.js"></script>
+</body>
+</html>

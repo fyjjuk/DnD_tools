@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campañas · DnD</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="label">Sesión</div>
+    <div id="user-name" class="round">…</div>
+  </div>
+  <div class="row-actions">
+    <button id="btn-logout" class="danger small" type="button">Logout</button>
+  </div>
+</header>
+
+<section class="panel">
+  <h2>Nueva campaña</h2>
+  <form id="form-new" class="auth-form-inline">
+    <input id="new-name" type="text" placeholder="Nombre (1-60)" required maxlength="60">
+    <button class="primary" type="submit">Crear</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Unirse por código</h2>
+  <form id="form-join" class="auth-form-inline">
+    <input id="join-code" type="text" placeholder="Código (6)" required
+           maxlength="6" pattern="[A-Za-z0-9]{6}">
+    <button type="submit">Unirme</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Mis campañas</h2>
+  <div id="campaign-list" class="campaigns-list">
+    <p class="muted">Cargando…</p>
+  </div>
+</section>
+
+<p id="msg" class="auth-msg" hidden></p>
+
+<script src="/static/campaigns.js"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import re
 import secrets
 import sqlite3
 from typing import Optional
@@ -14,6 +15,16 @@ from pydantic import BaseModel
 import config
 from backend.db import get_db, init_db
 from backend.ws import ConnectionManager
+from backend.auth import (
+    ApiError, create_user_session, ensure_dm_user, ensure_user_session,
+    hash_password, require_user, require_user_campaign_dm,
+    require_user_campaign_member, verify_password,
+)
+from backend.campaigns import (
+    add_member, create_campaign, create_session_in_campaign,
+    get_campaign, list_campaigns_for_user, list_members,
+    list_sessions_in_campaign, slugify,
+)
 
 BASE_DIR = config.BASE_DIR
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
@@ -22,6 +33,15 @@ app = FastAPI(title="DnD 5e Combat MVP")
 manager = ConnectionManager()
 
 init_db()
+
+
+@app.exception_handler(ApiError)
+async def _apierror_handler(request, exc):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.error, "code": exc.code},
+    )
 
 
 # ---------------------------------------------------------------- utilidades
@@ -192,6 +212,9 @@ async def dm_bootstrap(payload: Optional[BootstrapIn] = None):
             )
             log_event(db, cur.lastrowid, "session", f"Sesion {code} creada")
             session = db.execute("SELECT * FROM sessions WHERE id=?", (cur.lastrowid,)).fetchone()
+        # Bridge v2: dm_token tambien vale como X-User-Token.
+        dm_uid = ensure_dm_user(db)
+        ensure_user_session(db, dm_uid, session["dm_token"], session["created_at"])
     return {
         "session_id": session["id"],
         "code": session["code"],
@@ -252,11 +275,27 @@ async def join(payload: JoinIn):
             )
             player = db.execute("SELECT * FROM players WHERE id=?", (cur.lastrowid,)).fetchone()
             log_event(db, session["id"], "player", f"{name} se unio")
+            # Bridge v2: crear user guest + user_session + session_participant.
+            uname = f"{slugify(name)}_{player['id']}"
+            if db.execute("SELECT 1 FROM users WHERE username=?", (uname,)).fetchone():
+                uname = f"{uname}_p{player['id']}"
+            ucur = db.execute(
+                "INSERT INTO users (username, display_name, is_guest, created_at) "
+                "VALUES (?,?,1,?)",
+                (uname, name, player["created_at"]),
+            )
+            guest_uid = ucur.lastrowid
+            ensure_user_session(db, guest_uid, player["token"], player["created_at"])
+            db.execute(
+                "INSERT OR IGNORE INTO session_participants (session_id, user_id, joined_at) "
+                "VALUES (?,?,?)",
+                (session["id"], guest_uid, player["created_at"]),
+            )
             # auto-vinculo con un PJ del mismo nombre que aun no tenga jugador
             db.execute(
-                "UPDATE combatants SET player_id=? "
+                "UPDATE combatants SET player_id=?, user_id=? "
                 "WHERE session_id=? AND kind='pc' AND player_id IS NULL AND lower(name)=lower(?)",
-                (player["id"], session["id"], name),
+                (player["id"], guest_uid, session["id"], name),
             )
             await broadcast_state(session["id"])
 
@@ -352,11 +391,20 @@ async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header
 
         if kind == "pc":
             player = db.execute(
-                "SELECT id FROM players WHERE session_id=? AND lower(name)=lower(?)",
+                "SELECT id, token FROM players WHERE session_id=? AND lower(name)=lower(?)",
                 (session["id"], name),
             ).fetchone()
             if player:
                 db.execute("UPDATE combatants SET player_id=? WHERE id=?", (player["id"], cid))
+                # Bridge v2: escribir tambien user_id si el player tiene user asociado.
+                uid_row = db.execute(
+                    "SELECT user_id FROM user_sessions WHERE token=?", (player["token"],)
+                ).fetchone()
+                if uid_row is not None:
+                    db.execute(
+                        "UPDATE combatants SET user_id=? WHERE id=?",
+                        (uid_row["user_id"], cid),
+                    )
 
         log_event(db, session["id"], "combatant",
                   f"Agregado {name} ({kind}) init {payload.initiative} HP {hp_max}")
@@ -461,8 +509,16 @@ async def link_player(cid: int, payload: LinkIn, x_dm_token: Optional[str] = Hea
             if p is None:
                 raise HTTPException(status_code=404, detail="Jugador no encontrado")
             db.execute("UPDATE combatants SET player_id=? WHERE id=?", (p["id"], cid))
+            # Bridge v2: escribir tambien user_id.
+            uid_row = db.execute(
+                "SELECT user_id FROM user_sessions WHERE token=?", (p["token"],)
+            ).fetchone()
+            db.execute(
+                "UPDATE combatants SET user_id=? WHERE id=?",
+                (uid_row["user_id"] if uid_row else None, cid),
+            )
         else:
-            db.execute("UPDATE combatants SET player_id=NULL WHERE id=?", (cid,))
+            db.execute("UPDATE combatants SET player_id=NULL, user_id=NULL WHERE id=?", (cid,))
         sid = session["id"]
 
     await broadcast_state(sid)
@@ -754,6 +810,293 @@ async def player_catchall(path: str):
     # Evita 404 si el movil llega con un token pegado en la URL o un typo.
     return FileResponse(os.path.join(FRONTEND_DIR, "player.html"))
 
+
+# ================================================================
+# Fase 2.0: paginas nuevas (/register, /login, /campaigns)
+# ================================================================
+
+
+@app.get("/register")
+async def register_page():
+    return FileResponse(os.path.join(FRONTEND_DIR, "register.html"))
+
+
+@app.get("/login")
+async def login_page():
+    return FileResponse(os.path.join(FRONTEND_DIR, "login.html"))
+
+
+@app.get("/campaigns")
+async def campaigns_page():
+    return FileResponse(os.path.join(FRONTEND_DIR, "campaigns.html"))
+
+
+# ================================================================
+# Fase 2.0: auth
+# ================================================================
+
+USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
+
+
+class RegisterIn(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    display_name: Optional[str] = None
+
+
+class LoginIn(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+class CampaignIn(BaseModel):
+    name: Optional[str] = None
+    join_code: Optional[str] = None
+
+
+class CampaignPatchIn(BaseModel):
+    name: Optional[str] = None
+    join_code: Optional[str] = None
+
+
+class JoinCampaignIn(BaseModel):
+    code: Optional[str] = None
+
+
+@app.post("/api/auth/register")
+async def auth_register(payload: RegisterIn):
+    username = (payload.username or "").strip()
+    password = payload.password or ""
+    display_name = (payload.display_name or "").strip()
+    if not USERNAME_RE.match(username):
+        raise ApiError(400, "username invalido (3-32, [a-z0-9_-])", "INVALID_INPUT")
+    if len(password) < 8:
+        raise ApiError(400, "password demasiado corta (min 8)", "INVALID_INPUT")
+    if not (1 <= len(display_name) <= 40):
+        raise ApiError(400, "display_name invalido (1-40)", "INVALID_INPUT")
+    with get_db() as db:
+        if db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+            raise ApiError(409, "username ya existe", "USERNAME_TAKEN")
+        cur = db.execute(
+            "INSERT INTO users (username, display_name, password_hash, is_guest, created_at) "
+            "VALUES (?,?,?,0,?)",
+            (username, display_name, hash_password(password), now()),
+        )
+        uid = cur.lastrowid
+        token, expires = create_user_session(db, uid)
+    return {
+        "user_id": uid,
+        "token": token,
+        "expires_at": expires,
+        "display_name": display_name,
+    }
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: LoginIn):
+    username = (payload.username or "").strip()
+    password = payload.password or ""
+    if not username or not password:
+        raise ApiError(400, "username y password requeridos", "INVALID_INPUT")
+    with get_db() as db:
+        user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if user is None or not user["password_hash"]:
+            raise ApiError(401, "credenciales invalidas", "UNAUTHENTICATED")
+        if not verify_password(password, user["password_hash"]):
+            raise ApiError(401, "credenciales invalidas", "UNAUTHENTICATED")
+        token, expires = create_user_session(db, user["id"])
+        db.execute("UPDATE users SET last_seen_at=? WHERE id=?", (now(), user["id"]))
+        uid = user["id"]
+        display_name = user["display_name"]
+    return {
+        "user_id": uid,
+        "token": token,
+        "expires_at": expires,
+        "display_name": display_name,
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(x_user_token: Optional[str] = Header(None)):
+    if not x_user_token:
+        raise ApiError(401, "token requerido", "UNAUTHENTICATED")
+    with get_db() as db:
+        db.execute(
+            "UPDATE user_sessions SET revoked_at=? WHERE token=? AND revoked_at IS NULL",
+            (now(), x_user_token),
+        )
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me(x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+    return {
+        "user_id": user["id"],
+        "username": user["username"],
+        "display_name": user["display_name"],
+        "is_guest": user["is_guest"],
+    }
+
+
+# ================================================================
+# Fase 2.0: campanas
+# ================================================================
+
+
+@app.post("/api/campaigns")
+async def campaigns_create(payload: CampaignIn, x_user_token: Optional[str] = Header(None)):
+    name = (payload.name or "").strip()
+    if not (1 <= len(name) <= 60):
+        raise ApiError(400, "name invalido (1-60)", "INVALID_INPUT")
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        camp = create_campaign(db, user["id"], name, payload.join_code)
+    return {
+        "campaign_id": camp["id"],
+        "name": camp["name"],
+        "join_code": camp["join_code"],
+        "role": "dm",
+    }
+
+
+@app.get("/api/campaigns")
+async def campaigns_list(x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        rows = list_campaigns_for_user(db, user["id"])
+    return {
+        "items": [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "role": r["role"],
+                "status": r["status"],
+                "n_sessions": r["n_sessions"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/campaigns/{campaign_id}")
+async def campaigns_get(campaign_id: int, x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        _user, _member = require_user_campaign_member(db, x_user_token, campaign_id)
+        camp = get_campaign(db, campaign_id)
+        members = list_members(db, campaign_id)
+        sessions = list_sessions_in_campaign(db, campaign_id)
+    return {
+        "id": camp["id"],
+        "name": camp["name"],
+        "join_code": camp["join_code"],
+        "status": camp["status"],
+        "members": [
+            {"user_id": m["user_id"], "display_name": m["display_name"], "role": m["role"]}
+            for m in members
+        ],
+        "sessions": [
+            {
+                "id": s["id"], "code": s["code"], "status": s["status"],
+                "round": s["round"], "created_at": s["created_at"],
+                "closed_at": s["closed_at"],
+            }
+            for s in sessions
+        ],
+    }
+
+
+@app.patch("/api/campaigns/{campaign_id}")
+async def campaigns_patch(campaign_id: int, payload: CampaignPatchIn,
+                          x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        _user, _member = require_user_campaign_dm(db, x_user_token, campaign_id)
+        camp = get_campaign(db, campaign_id)
+        new_name = camp["name"]
+        new_code = camp["join_code"]
+        if payload.name is not None:
+            name = payload.name.strip()
+            if not (1 <= len(name) <= 60):
+                raise ApiError(400, "name invalido (1-60)", "INVALID_INPUT")
+            new_name = name
+        if payload.join_code is not None:
+            code = payload.join_code.strip().upper()
+            if not re.fullmatch(r"[A-Z0-9]{6}", code):
+                raise ApiError(400, "join_code invalido", "INVALID_INPUT")
+            taken = db.execute(
+                "SELECT 1 FROM campaigns WHERE join_code=? AND id<>?",
+                (code, campaign_id),
+            ).fetchone()
+            if taken:
+                raise ApiError(409, "join_code ya en uso", "JOIN_CODE_TAKEN")
+            new_code = code
+        db.execute(
+            "UPDATE campaigns SET name=?, join_code=? WHERE id=?",
+            (new_name, new_code, campaign_id),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/campaigns/{campaign_id}/archive")
+async def campaigns_archive(campaign_id: int, x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        _user, _member = require_user_campaign_dm(db, x_user_token, campaign_id)
+        db.execute(
+            "UPDATE campaigns SET status='archived', archived_at=? WHERE id=?",
+            (now(), campaign_id),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/campaigns/join")
+async def campaigns_join(payload: JoinCampaignIn, x_user_token: Optional[str] = Header(None)):
+    code = (payload.code or "").strip().upper()
+    if not code:
+        raise ApiError(400, "code requerido", "INVALID_INPUT")
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        camp = db.execute("SELECT * FROM campaigns WHERE join_code=?", (code,)).fetchone()
+        if camp is None or camp["status"] != "active":
+            raise ApiError(404, "campana no encontrada", "NOT_FOUND")
+        add_member(db, camp["id"], user["id"], "player")
+    return {"campaign_id": camp["id"], "name": camp["name"], "role": "player"}
+
+
+@app.post("/api/campaigns/{campaign_id}/sessions")
+async def campaigns_create_session(campaign_id: int,
+                                   x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        user, _member = require_user_campaign_dm(db, x_user_token, campaign_id)
+        sess = create_session_in_campaign(db, campaign_id, user["id"])
+    return {
+        "session_id": sess["id"],
+        "code": sess["code"],
+        "campaign_id": campaign_id,
+    }
+
+
+@app.get("/api/campaigns/{campaign_id}/sessions")
+async def campaigns_list_sessions(campaign_id: int,
+                                  x_user_token: Optional[str] = Header(None)):
+    with get_db() as db:
+        _user, _member = require_user_campaign_member(db, x_user_token, campaign_id)
+        sessions = list_sessions_in_campaign(db, campaign_id)
+    return {
+        "items": [
+            {
+                "id": s["id"], "code": s["code"], "status": s["status"],
+                "round": s["round"], "created_at": s["created_at"],
+                "closed_at": s["closed_at"],
+            }
+            for s in sessions
+        ]
+    }
+
+
+# ================================================================
+# Fase 1: frontend legacy (se conserva tal cual)
+# ================================================================
 
 @app.get("/favicon.ico")
 @app.get("/favicon.svg")

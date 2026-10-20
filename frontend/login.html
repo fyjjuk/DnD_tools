@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login · DnD Campaigns</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<div class="auth-card">
+  <h1>Iniciar sesión</h1>
+  <p class="muted">Entra con tu cuenta.</p>
+  <form id="login-form" class="auth-form" autocomplete="off">
+    <label>Usuario
+      <input id="f-username" type="text" required autocomplete="username">
+    </label>
+    <label>Contraseña
+      <input id="f-password" type="password" required
+             autocomplete="current-password">
+    </label>
+    <button class="primary" type="submit" id="btn-submit">Entrar</button>
+  </form>
+  <p id="msg" class="auth-msg" hidden></p>
+  <p class="auth-footer">¿Sin cuenta? <a href="/register">Regístrate</a></p>
+</div>
+<script src="/static/login.js"></script>
+</body>
+</html>
