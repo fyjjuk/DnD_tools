@@ -111,8 +111,8 @@ def require_user(db, token):
         raise ApiError(401, "unauthenticated", "UNAUTHENTICATED")
     row = db.execute(
         "SELECT u.* FROM users u JOIN user_sessions us ON us.user_id=u.id "
-        "WHERE us.token=? AND us.revoked_at IS NULL",
-        (token,),
+        "WHERE us.token=? AND us.revoked_at IS NULL AND us.expires_at > ?",
+        (token, _now()),
     ).fetchone()
     if row is None:
         raise ApiError(401, "unauthenticated", "UNAUTHENTICATED")

@@ -2,6 +2,7 @@
 import datetime
 import re
 import secrets
+import sqlite3
 
 from backend.auth import ApiError, ensure_user_session
 
@@ -75,7 +76,9 @@ def list_campaigns_for_user(db, user_id: int):
     rows = db.execute(
         """
         SELECT c.*, m.role AS role,
-               (SELECT COUNT(*) FROM sessions s WHERE s.campaign_id = c.id) AS n_sessions
+               (SELECT COUNT(*) FROM sessions s WHERE s.campaign_id = c.id) AS n_sessions,
+               (SELECT COUNT(*) FROM sessions s
+                WHERE s.campaign_id = c.id AND s.status='active') AS n_sessions_active
         FROM campaigns c
         JOIN campaign_members m ON m.campaign_id = c.id
         WHERE m.user_id = ?
@@ -100,7 +103,7 @@ def add_member(db, campaign_id: int, user_id: int, role: str) -> bool:
             (campaign_id, user_id, role, now),
         )
         return cur.rowcount > 0
-    except Exception:
+    except sqlite3.IntegrityError:
         return False
 
 

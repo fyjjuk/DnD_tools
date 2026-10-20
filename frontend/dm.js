@@ -301,10 +301,18 @@ $("btn-load-log").addEventListener("click", async () => {
 // ---------------- init
 
 (async function init() {
-  const storedPw = sessionStorage.getItem(DM_PW_KEY);
-  if (storedPw) {
-    await login(storedPw);
-  } else {
-    showLogin();
+  const userToken = localStorage.getItem("dnd_user_token");
+  const dmToken = localStorage.getItem(DM_TOKEN_KEY);
+  if (!dmToken && userToken) {
+    window.location.href = "/campaigns";
+    return;
   }
+  if (!dmToken && !userToken) {
+    window.location.href = "/dm-login";
+    return;
+  }
+  // dmToken existe: flujo legacy, proceder como hoy.
+  showMain();
+  openSocket();
+  loadClosedSessions();
 })();

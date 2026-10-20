@@ -50,6 +50,60 @@ En este equipo es 192.168.1.34.
 | Jugador | http://192.168.1.34:8000/player  |
 | Ambos   | http://192.168.1.34:8000/        |
 
+## Acceso con cuenta (Fase 2.1)
+
+Ademas del flujo legacy con contrasena de DM y codigo de sesion,
+ahora hay entrada con cuenta para DM y jugador. Los flujos legacy
+siguen funcionando exactamente igual que en Fase 1 (el gate solo
+enruta al inicio, no cambia el combate).
+
+### DM con cuenta
+
+1. Abre `/register` (o `/login`) y crea/usa tu cuenta.
+2. Ve a `/campaigns` y crea una campana (o abre una existente).
+3. Pulsa **Abrir consola DM** en la tarjeta de la campana.
+   - Si no habia sesion activa, se crea una.
+   - Si ya habia una, se reutiliza (idempotente).
+4. El backend devuelve el `dm_token` de esa sesion y el frontend
+   lo guarda en `localStorage.dnd_dm_token`. Redirige a `/dm`.
+5. A partir de ahi, `/dm` funciona igual que en el flujo legacy.
+
+### Jugador con cuenta
+
+1. Abre `/login` y entra con tu cuenta.
+2. Ve a `/campaigns` y unete por codigo a la campana del DM
+   (el codigo de **CAMPANA** de 6 letras, no el de sesion).
+3. Cuando el DM tenga una sesion activa, aparecera **Unirme a sesion**
+   en la tarjeta de la campana.
+4. Al pulsarlo, el backend devuelve (o crea) un `player_token` y el
+   frontend lo guarda en `localStorage.dnd_player_token`. Redirige a
+   `/player`.
+5. Si hay un combatiente PC con el mismo nombre que tu
+   `display_name`, se vincula solo. Si no, pidele al DM que te asigne.
+
+### DM recovery con contrasena
+
+Si has perdido el acceso a la cuenta del DM, abre `/dm-login` e
+introduce la contrasena de DM (`config.py: DM_PASSWORD`). El
+formulario llama a `/api/dm/bootstrap`, guarda el `dm_token` y
+redirige a `/dm`.
+
+Ese mismo `/dm-login` esta enlazado desde `/campaigns` (footer) y
+desde `/dm` (cuando no hay token en localStorage).
+
+### Reset de la contrasena del user `dm`
+
+Si cambias `DM_PASSWORD` en `config.py` y quieres que el login por
+cuenta (`/login` como usuario `dm`) acepte la nueva contrasena,
+ejecuta con el servidor parado:
+
+```bash
+python -m backend.reset_dm_password
+```
+
+El flujo legacy `/api/dm/bootstrap` **no** necesita este script:
+lee `DM_PASSWORD` de `config.py` en cada request.
+
 ## Flujo de uso
 
 1. El DM abre `/dm`. Se crea automáticamente una sesión y aparece un

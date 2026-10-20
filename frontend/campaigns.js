@@ -55,6 +55,8 @@ function renderCampaign(c) {
   const card = document.createElement("div");
   card.className = "campaign-card";
 
+  const hasActive = (c.n_sessions_active || 0) > 0;
+
   const head = document.createElement("div");
   head.className = "campaign-head";
   head.innerHTML =
@@ -62,8 +64,10 @@ function renderCampaign(c) {
     '<div class="campaign-meta"></div></div>' +
     '<div class="row-actions"></div>';
   head.querySelector(".campaign-name").textContent = c.name;
-  head.querySelector(".campaign-meta").textContent =
-    "rol: " + c.role + " · " + c.status + " · " + c.n_sessions + " sesiones";
+  let meta = "rol: " + c.role + " · " + c.status + " · " +
+             c.n_sessions + " sesiones";
+  if (hasActive) meta += " · sesión activa";
+  head.querySelector(".campaign-meta").textContent = meta;
 
   const actions = head.querySelector(".row-actions");
   const btnToggle = document.createElement("button");
@@ -73,12 +77,61 @@ function renderCampaign(c) {
   actions.appendChild(btnToggle);
 
   if (c.role === "dm") {
-    const btnCreate = document.createElement("button");
-    btnCreate.type = "button";
-    btnCreate.className = "primary small";
-    btnCreate.textContent = "Crear sesión";
-    btnCreate.addEventListener("click", () => createSession(c.id));
-    actions.appendChild(btnCreate);
+    const btnOpen = document.createElement("button");
+    btnOpen.type = "button";
+    btnOpen.className = "primary small";
+    btnOpen.textContent = "Abrir consola DM";
+    btnOpen.addEventListener("click", async () => {
+      try {
+        const data = await api(
+          "/api/campaigns/" + c.id + "/open-session",
+          { method: "POST" }
+        );
+        if (data && data.dm_token) {
+          localStorage.setItem("dnd_dm_token", data.dm_token);
+          window.location.href = "/dm";
+        }
+      } catch (e) {
+        setMsg("Error abriendo consola: " + e.message, true);
+      }
+    });
+    actions.appendChild(btnOpen);
+
+    if (!hasActive) {
+      const btnCreate = document.createElement("button");
+      btnCreate.type = "button";
+      btnCreate.className = "small";
+      btnCreate.textContent = "Crear sesión";
+      btnCreate.addEventListener("click", () => createSession(c.id));
+      actions.appendChild(btnCreate);
+    }
+  } else if (c.role === "player") {
+    if (hasActive) {
+      const btnJoin = document.createElement("button");
+      btnJoin.type = "button";
+      btnJoin.className = "primary small";
+      btnJoin.textContent = "Unirme a sesión";
+      btnJoin.addEventListener("click", async () => {
+        try {
+          const data = await api(
+            "/api/campaigns/" + c.id + "/join-player",
+            { method: "POST" }
+          );
+          if (data && data.token) {
+            localStorage.setItem("dnd_player_token", data.token);
+            window.location.href = "/player";
+          }
+        } catch (e) {
+          setMsg("Error uniendo a sesión: " + e.message, true);
+        }
+      });
+      actions.appendChild(btnJoin);
+    } else {
+      const note = document.createElement("span");
+      note.className = "muted small";
+      note.textContent = "Sin sesión activa";
+      actions.appendChild(note);
+    }
   }
 
   const panel = document.createElement("div");
@@ -155,7 +208,12 @@ async function onJoin(ev) {
       await loadCampaigns();
     }
   } catch (e) {
-    setMsg("Error: " + e.message, true);
+    let msg = e.message || String(e);
+    if (/not found|campana no encontrada|404/i.test(msg)) {
+      msg += " (revisa que usas el código de CAMPAÑA de 6 letras, " +
+             "no el código de SESIÓN)";
+    }
+    setMsg("Error: " + msg, true);
   }
 }
 

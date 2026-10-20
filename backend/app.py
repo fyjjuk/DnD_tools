@@ -831,6 +831,12 @@ async def campaigns_page():
     return FileResponse(os.path.join(FRONTEND_DIR, "campaigns.html"))
 
 
+# Fase 2.1: pagina de recovery de DM (password legacy).
+@app.get("/dm-login")
+async def dm_login_page():
+    return FileResponse(os.path.join(FRONTEND_DIR, "dm-login.html"))
+
+
 # ================================================================
 # Fase 2.0: auth
 # ================================================================
@@ -974,6 +980,7 @@ async def campaigns_list(x_user_token: Optional[str] = Header(None)):
                 "role": r["role"],
                 "status": r["status"],
                 "n_sessions": r["n_sessions"],
+                "n_sessions_active": r["n_sessions_active"],
             }
             for r in rows
         ]
@@ -1070,6 +1077,93 @@ async def campaigns_create_session(campaign_id: int,
         user, _member = require_user_campaign_dm(db, x_user_token, campaign_id)
         sess = create_session_in_campaign(db, campaign_id, user["id"])
     return {
+        "session_id": sess["id"],
+        "code": sess["code"],
+        "dm_token": sess["dm_token"],
+        "campaign_id": campaign_id,
+    }
+
+
+@app.post("/api/campaigns/{campaign_id}/open-session")
+async def campaigns_open_session(campaign_id: int,
+                                 x_user_token: Optional[str] = Header(None)):
+    """Devuelve el dm_token de la sesion activa de esta campana (o la crea).
+
+    Auth: X-User-Token del DM de la campana. Idempotente mientras haya
+    sesion activa en la campana. Si hay una sesion activa de OTRA
+    campana, create_session_in_campaign devuelve 409 (una sesion activa
+    global).
+    """
+    with get_db() as db:
+        user, _member = require_user_campaign_dm(db, x_user_token, campaign_id)
+        sess = db.execute(
+            "SELECT * FROM sessions WHERE campaign_id=? AND status='active' LIMIT 1",
+            (campaign_id,),
+        ).fetchone()
+        if sess is None:
+            sess = create_session_in_campaign(db, campaign_id, user["id"])
+    return {
+        "session_id": sess["id"],
+        "code": sess["code"],
+        "dm_token": sess["dm_token"],
+        "campaign_id": campaign_id,
+    }
+
+
+@app.post("/api/campaigns/{campaign_id}/join-player")
+async def campaigns_join_player(campaign_id: int,
+                                x_user_token: Optional[str] = Header(None)):
+    """Devuelve (o crea) un player_token para el user en la sesion activa.
+
+    Auth: X-User-Token de un miembro de la campana. Reusa la fila de
+    players si ya existe para (session_id, display_name); si no, crea
+    una con nombre = user.display_name. Registra session_participants
+    (idempotente) y auto-vincula el primer PJ con el mismo nombre.
+    """
+    with get_db() as db:
+        user, _member = require_user_campaign_member(db, x_user_token, campaign_id)
+        sess = db.execute(
+            "SELECT * FROM sessions WHERE campaign_id=? AND status='active' LIMIT 1",
+            (campaign_id,),
+        ).fetchone()
+        if sess is None:
+            raise ApiError(404, "no hay sesion activa en esta campana", "NOT_FOUND")
+
+        existing = db.execute(
+            "SELECT * FROM players WHERE session_id=? AND lower(name)=lower(?)",
+            (sess["id"], user["display_name"]),
+        ).fetchone()
+        if existing:
+            player = existing
+        else:
+            token = secrets.token_urlsafe(24)
+            cur = db.execute(
+                "INSERT INTO players (session_id, name, token, created_at) "
+                "VALUES (?,?,?,?)",
+                (sess["id"], user["display_name"], token, now()),
+            )
+            player = db.execute(
+                "SELECT * FROM players WHERE id=?", (cur.lastrowid,)
+            ).fetchone()
+            log_event(db, sess["id"], "player",
+                      f"{user['display_name']} se unio (cuenta)")
+
+        db.execute(
+            "INSERT OR IGNORE INTO session_participants "
+            "(session_id, user_id, joined_at) VALUES (?,?,?)",
+            (sess["id"], user["id"], now()),
+        )
+        db.execute(
+            "UPDATE combatants SET player_id=?, user_id=? "
+            "WHERE session_id=? AND kind='pc' AND player_id IS NULL "
+            "AND lower(name)=lower(?)",
+            (player["id"], user["id"], sess["id"], user["display_name"]),
+        )
+        sid = sess["id"]
+    await broadcast_state(sid)
+    return {
+        "player_id": player["id"],
+        "token": player["token"],
         "session_id": sess["id"],
         "code": sess["code"],
         "campaign_id": campaign_id,

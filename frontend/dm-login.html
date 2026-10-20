@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consola de DM · DnD</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/auth.css">
+</head>
+<body>
+<div class="auth-card">
+  <h1>Consola de DM</h1>
+  <p class="muted">Entra con la contraseña de DM para recuperar
+     acceso, o usa tu cuenta.</p>
+  <form id="recover-form" class="auth-form" autocomplete="off">
+    <label>Contraseña DM
+      <input id="f-pw" type="password" required autofocus
+             autocomplete="current-password">
+    </label>
+    <button class="primary" type="submit" id="btn-submit">Entrar (recovery)</button>
+  </form>
+  <p id="msg" class="auth-msg" hidden></p>
+  <p class="auth-footer">
+    <a href="/login">Tengo cuenta</a> ·
+    <a href="/register">Crear cuenta</a>
+  </p>
+  <p class="auth-footer">
+    <a href="/campaigns">Ir a mis campañas</a>
+  </p>
+</div>
+<script src="/static/dm-login.js"></script>
+</body>
+</html>

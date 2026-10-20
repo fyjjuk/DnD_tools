@@ -15,18 +15,25 @@ function showCombat() {
   $("combat-view").classList.remove("hidden");
 }
 
-async function start() {
-  if (!playerToken) { showJoin(); return; }
-  try {
-    await API.get("/api/player/me", { "X-Player-Token": playerToken });
-    showCombat();
-    openSocket();
-  } catch (err) {
-    localStorage.removeItem(TOKEN_KEY);
-    playerToken = null;
-    showJoin();
+(async function init() {
+  const userToken = localStorage.getItem("dnd_user_token");
+  if (playerToken) {
+    try {
+      await API.get("/api/player/me", { "X-Player-Token": playerToken });
+      showCombat();
+      openSocket();
+      return;
+    } catch (err) {
+      localStorage.removeItem(TOKEN_KEY);
+      playerToken = null;
+    }
   }
-}
+  if (userToken) {
+    window.location.href = "/campaigns";
+    return;
+  }
+  showJoin();
+})();
 
 function openSocket() {
   if (socket) socket.close();
@@ -59,10 +66,14 @@ function render() {
         if (socket) socket.close();
         localStorage.removeItem(TOKEN_KEY);
         playerToken = null;
-        state = null;
-        $("j-code").value = "";
-        $("j-name").value = "";
-        showJoin();
+        if (localStorage.getItem("dnd_user_token")) {
+          window.location.href = "/campaigns";
+        } else {
+          state = null;
+          $("j-code").value = "";
+          $("j-name").value = "";
+          showJoin();
+        }
       });
     }
     return;
@@ -162,4 +173,3 @@ $("join-form").addEventListener("submit", async (event) => {
   }
 });
 
-start();
