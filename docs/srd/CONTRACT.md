@@ -483,3 +483,26 @@ Para que el programador sepa cuándo ha terminado:
 - **`errors_json` obligatorio para avanzar de fase** — sin este gate, un drift no detectado se propaga a 2.3/2.5.
 - **Anti-scope-creep §6 vinculante** — cualquier PR que implemente motor de reglas, simulación o i18n se rechaza; evita que el proyecto se desborde.
 - **Checklist de 11 ítems §7** — da un criterio objetivo de "Fase 2.2 terminada".
+
+---
+
+## 9. Estado de implementación (Fase 2.1.2-B-2)
+
+Con la ejecución de la Fase 2.1.2-B-2 (Reconciliación del SRD), se han completado las siguientes integraciones y ajustes sobre `data/srd.db` y `backend/app.py`:
+
+1. **Columnas JSON en `monsters`:**
+   - Columna `collection_id` añadida y vinculada con `collections(id)` para los 334 monstruos (0 nulos).
+   - Añadidas y pobladas las 8 columnas JSON: `damage_immunities_json`, `damage_resistances_json`, `damage_vulnerabilities_json`, `condition_immunities_json`, `special_abilities_json`, `actions_json`, `legendary_actions_json` y `reactions_json` mediante `json_extract(data, '$.campo')`.
+   - Se mantiene la columna original `data` íntegra.
+
+2. **Colecciones de referencia en SQLite:**
+   - Tabla `reference_entries` creada e indexada con las colecciones `conditions` (15 registros) y `damage-types` (13 registros).
+
+3. **Importadores y verificadores:**
+   - `scripts/import_srd.py` actualizado para poblar de forma automática `collection_id` y las 8 columnas JSON en futuras ejecuciones.
+   - `scripts/verify_srd.py` ampliado con validaciones automáticas de `collection_id` (sin nulos ni huérfanas) y comprobación de integridad y no vacuidad de las columnas JSON (12/12 verificaciones OK).
+
+4. **Endpoints REST:**
+   - `GET /api/srd/monsters`: soporta paginación con `offset` (default 0) y `limit`, retornando el objeto con `{ items, total, limit, offset }`.
+   - `GET /api/srd/refs/{collection}`: implementado y operativo para `conditions` y `damage-types` (retorna lista de `{index, name}`, 404 para otras colecciones).
+

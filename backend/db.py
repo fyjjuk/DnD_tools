@@ -175,34 +175,52 @@ CREATE INDEX IF NOT EXISTS idx_import_meta_coll
     ON import_meta(collection_slug, imported_at);
 
 CREATE TABLE IF NOT EXISTS monsters (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    collection_slug    TEXT NOT NULL DEFAULT 'monsters',
-    index_slug         TEXT NOT NULL UNIQUE,
-    name               TEXT NOT NULL,
-    size               TEXT,
-    type               TEXT,
-    subtype            TEXT,
-    alignment          TEXT,
-    hit_points         INTEGER NOT NULL,
-    hit_dice           TEXT,
-    hit_points_roll    TEXT,
-    armor_class        INTEGER,
-    armor_class_type   TEXT,
-    challenge_rating   REAL NOT NULL,
-    xp                 INTEGER NOT NULL,
-    strength           INTEGER,
-    dexterity          INTEGER,
-    constitution       INTEGER,
-    intelligence       INTEGER,
-    wisdom             INTEGER,
-    charisma           INTEGER,
-    proficiency_bonus  INTEGER,
-    data               TEXT NOT NULL
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id          INTEGER NOT NULL REFERENCES collections(id),
+    index_slug             TEXT NOT NULL UNIQUE,
+    name                   TEXT NOT NULL,
+    size                   TEXT,
+    type                   TEXT,
+    subtype                TEXT,
+    alignment              TEXT,
+    hit_points             INTEGER NOT NULL,
+    hit_dice               TEXT,
+    hit_points_roll        TEXT,
+    armor_class            INTEGER,
+    armor_class_type       TEXT,
+    challenge_rating       REAL NOT NULL,
+    xp                     INTEGER NOT NULL,
+    strength               INTEGER,
+    dexterity              INTEGER,
+    constitution           INTEGER,
+    intelligence           INTEGER,
+    wisdom                 INTEGER,
+    charisma               INTEGER,
+    proficiency_bonus      INTEGER,
+    damage_immunities_json     TEXT,
+    damage_resistances_json    TEXT,
+    damage_vulnerabilities_json TEXT,
+    condition_immunities_json  TEXT,
+    special_abilities_json     TEXT,
+    actions_json               TEXT,
+    legendary_actions_json     TEXT,
+    reactions_json             TEXT,
+    data                   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_monsters_cr   ON monsters(challenge_rating);
 CREATE INDEX IF NOT EXISTS idx_monsters_type ON monsters(type);
 CREATE INDEX IF NOT EXISTS idx_monsters_size ON monsters(size);
 CREATE INDEX IF NOT EXISTS idx_monsters_name ON monsters(name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS reference_entries (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL REFERENCES collections(id),
+    index_slug    TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    data          TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_coll_slug ON reference_entries(collection_id, index_slug);
+CREATE INDEX IF NOT EXISTS idx_ref_coll ON reference_entries(collection_id);
 """
 
 SCHEMA_HOMEBREW = """

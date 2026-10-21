@@ -168,6 +168,67 @@ def main() -> int:
 
     results.append(check("12. import_meta monsters", q12))
 
+    # 13. collection_id vinculada y no nula
+    def q13():
+        n_null = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE collection_id IS NULL"
+        ).fetchone()["n"]
+        n_unmatched = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters m LEFT JOIN collections c ON m.collection_id = c.id WHERE c.id IS NULL"
+        ).fetchone()["n"]
+        ok = (n_null == 0 and n_unmatched == 0)
+        return ok, f"collection_id NULL={n_null}, huerfanas={n_unmatched}"
+
+    results.append(check("13. monsters.collection_id valida y sin NULLs", q13))
+
+    # 14. Columnas JSON de acciones y habilidades
+    def q14():
+        n_actions = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE actions_json IS NOT NULL AND actions_json != ''"
+        ).fetchone()["n"]
+        n_spec = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE special_abilities_json IS NOT NULL AND special_abilities_json != ''"
+        ).fetchone()["n"]
+        n_leg = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE legendary_actions_json IS NOT NULL AND legendary_actions_json != ''"
+        ).fetchone()["n"]
+        n_reac = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE reactions_json IS NOT NULL AND reactions_json != ''"
+        ).fetchone()["n"]
+        ok = (n_actions == 331 and n_spec > 200 and n_leg > 30 and n_reac > 10)
+        return ok, f"actions={n_actions}/334, special={n_spec}, legendary={n_leg}, reactions={n_reac}"
+
+    results.append(check("14. Columnas JSON de acciones/habilidades pobladas", q14))
+
+    # 15. Columnas JSON de inmunidades y resistencias
+    def q15():
+        n_dmg_imm = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE damage_immunities_json IS NOT NULL AND damage_immunities_json != ''"
+        ).fetchone()["n"]
+        n_dmg_res = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE damage_resistances_json IS NOT NULL AND damage_resistances_json != ''"
+        ).fetchone()["n"]
+        n_dmg_vuln = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE damage_vulnerabilities_json IS NOT NULL AND damage_vulnerabilities_json != ''"
+        ).fetchone()["n"]
+        n_cond_imm = conn.execute(
+            "SELECT COUNT(*) AS n FROM monsters WHERE condition_immunities_json IS NOT NULL AND condition_immunities_json != ''"
+        ).fetchone()["n"]
+        ok = (n_dmg_imm == 334 and n_dmg_res == 334 and n_dmg_vuln == 334 and n_cond_imm == 334)
+        return ok, f"dmg_imm={n_dmg_imm}, dmg_res={n_dmg_res}, dmg_vuln={n_dmg_vuln}, cond_imm={n_cond_imm}"
+
+    results.append(check("15. Columnas JSON de danos/estados pobladas", q15))
+
+    # 16. JSON extract valido sobre actions_json
+    def q16():
+        r = conn.execute(
+            "SELECT json_extract(actions_json, '$[0].name') AS first_action FROM monsters WHERE index_slug='goblin'"
+        ).fetchone()
+        ok = r and r["first_action"] == "Cimitarra"
+        return bool(ok), f"primera accion goblin={r['first_action'] if r else None}"
+
+    results.append(check("16. actions_json de goblin contiene JSON valido", q16))
+
     conn.close()
 
     failed = sum(1 for r in results if not r)

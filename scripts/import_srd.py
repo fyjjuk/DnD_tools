@@ -50,29 +50,37 @@ CREATE INDEX IF NOT EXISTS idx_import_meta_coll
 
 DDL_MONSTERS = """
 CREATE TABLE IF NOT EXISTS monsters (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    collection_slug    TEXT NOT NULL DEFAULT 'monsters',
-    index_slug         TEXT NOT NULL UNIQUE,
-    name               TEXT NOT NULL,
-    size               TEXT,
-    type               TEXT,
-    subtype            TEXT,
-    alignment          TEXT,
-    hit_points         INTEGER NOT NULL,
-    hit_dice           TEXT,
-    hit_points_roll    TEXT,
-    armor_class        INTEGER,
-    armor_class_type   TEXT,
-    challenge_rating   REAL NOT NULL,
-    xp                 INTEGER NOT NULL,
-    strength           INTEGER,
-    dexterity          INTEGER,
-    constitution       INTEGER,
-    intelligence       INTEGER,
-    wisdom             INTEGER,
-    charisma           INTEGER,
-    proficiency_bonus  INTEGER,
-    data               TEXT NOT NULL
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id          INTEGER NOT NULL REFERENCES collections(id),
+    index_slug             TEXT NOT NULL UNIQUE,
+    name                   TEXT NOT NULL,
+    size                   TEXT,
+    type                   TEXT,
+    subtype                TEXT,
+    alignment              TEXT,
+    hit_points             INTEGER NOT NULL,
+    hit_dice               TEXT,
+    hit_points_roll        TEXT,
+    armor_class            INTEGER,
+    armor_class_type       TEXT,
+    challenge_rating       REAL NOT NULL,
+    xp                     INTEGER NOT NULL,
+    strength               INTEGER,
+    dexterity              INTEGER,
+    constitution           INTEGER,
+    intelligence           INTEGER,
+    wisdom                 INTEGER,
+    charisma               INTEGER,
+    proficiency_bonus      INTEGER,
+    damage_immunities_json     TEXT,
+    damage_resistances_json    TEXT,
+    damage_vulnerabilities_json TEXT,
+    condition_immunities_json  TEXT,
+    special_abilities_json     TEXT,
+    actions_json               TEXT,
+    legendary_actions_json     TEXT,
+    reactions_json             TEXT,
+    data                   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_monsters_cr   ON monsters(challenge_rating);
 CREATE INDEX IF NOT EXISTS idx_monsters_type ON monsters(type);
@@ -93,7 +101,7 @@ def file_sha256(path: str) -> str:
     return h.hexdigest()
 
 
-def map_monster(record: dict) -> dict:
+def map_monster(record: dict, collection_id: int) -> dict:
     """Convierte un registro de Monsters (es/) en kwargs para INSERT.
 
     armor_class es un array; tomamos [0].{value,type} como columnas reales
@@ -103,7 +111,7 @@ def map_monster(record: dict) -> dict:
     ac0_value = ac[0]["value"] if ac else None
     ac0_type = ac[0]["type"] if ac else None
     return {
-        "collection_slug": "monsters",
+        "collection_id": collection_id,
         "index_slug": record["index"],
         "name": record["name"],
         "size": record.get("size"),
@@ -124,6 +132,46 @@ def map_monster(record: dict) -> dict:
         "wisdom": record.get("wisdom"),
         "charisma": record.get("charisma"),
         "proficiency_bonus": record.get("proficiency_bonus"),
+        "damage_immunities_json": (
+            json.dumps(record["damage_immunities"], ensure_ascii=False)
+            if "damage_immunities" in record
+            else "[]"
+        ),
+        "damage_resistances_json": (
+            json.dumps(record["damage_resistances"], ensure_ascii=False)
+            if "damage_resistances" in record
+            else "[]"
+        ),
+        "damage_vulnerabilities_json": (
+            json.dumps(record["damage_vulnerabilities"], ensure_ascii=False)
+            if "damage_vulnerabilities" in record
+            else "[]"
+        ),
+        "condition_immunities_json": (
+            json.dumps(record["condition_immunities"], ensure_ascii=False)
+            if "condition_immunities" in record
+            else "[]"
+        ),
+        "special_abilities_json": (
+            json.dumps(record["special_abilities"], ensure_ascii=False)
+            if record.get("special_abilities") is not None
+            else None
+        ),
+        "actions_json": (
+            json.dumps(record["actions"], ensure_ascii=False)
+            if record.get("actions") is not None
+            else None
+        ),
+        "legendary_actions_json": (
+            json.dumps(record["legendary_actions"], ensure_ascii=False)
+            if record.get("legendary_actions") is not None
+            else None
+        ),
+        "reactions_json": (
+            json.dumps(record["reactions"], ensure_ascii=False)
+            if record.get("reactions") is not None
+            else None
+        ),
         "data": json.dumps(record, ensure_ascii=False),
     }
 
@@ -176,17 +224,29 @@ def main() -> int:
         conn.executescript(DDL_COLLECTIONS)
         conn.executescript(DDL_IMPORT_META)
 
-        # Idempotencia: solo toca 'monsters' y sus filas de metadatos.
+        ts = now_iso()
+
+        # Idempotencia: asegurar coleccion 'monsters' y obtener su ID
+        cur = conn.execute("SELECT id FROM collections WHERE slug='monsters'")
+        crow = cur.fetchone()
+        if crow:
+            collection_id = crow["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO collections (slug, name, source, imported_at, record_count) "
+                "VALUES ('monsters', 'Monsters', 'srd-2014-es', ?, 0)",
+                (ts,),
+            )
+            collection_id = cur.lastrowid
+
+        # Recrear solo tabla monsters y limpiar import_meta de monsters
         conn.execute("DROP TABLE IF EXISTS monsters")
         conn.executescript(DDL_MONSTERS)
-        conn.execute("DELETE FROM collections WHERE slug='monsters'")
         conn.execute("DELETE FROM import_meta WHERE collection_slug='monsters'")
-
-        ts = now_iso()
 
         for rec in monsters:
             try:
-                row = map_monster(rec)
+                row = map_monster(rec, collection_id)
                 cols = list(row.keys())
                 placeholders = ",".join(["?"] * len(cols))
                 conn.execute(
@@ -201,9 +261,8 @@ def main() -> int:
         errors_json = json.dumps(errors, ensure_ascii=False) if errors else None
 
         conn.execute(
-            "INSERT INTO collections (slug, name, source, imported_at, record_count) "
-            "VALUES ('monsters', 'Monsters', 'srd-2014-es', ?, ?)",
-            (ts, inserted),
+            "UPDATE collections SET imported_at=?, record_count=? WHERE id=?",
+            (ts, inserted, collection_id),
         )
         conn.execute(
             "INSERT INTO import_meta (collection_slug, source_path, source_locale, "

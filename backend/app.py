@@ -667,6 +667,7 @@ async def srd_monsters(
     type: Optional[str] = None,
     size: Optional[str] = None,
     limit: int = 50,
+    offset: int = 0,
 ):
     """Lista/busca monstruos del bestiario SRD (solo lectura, sin token).
 
@@ -674,36 +675,40 @@ async def srd_monsters(
     una lista vacia en lugar de 500: el servidor arranca y /dm funciona.
     """
     limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
 
-    sql = (
-        "SELECT index_slug, name, hit_points, armor_class, challenge_rating, "
-        "       type, size, xp, dexterity "
-        "FROM monsters WHERE 1=1"
-    )
+    where_sql = " FROM monsters WHERE 1=1"
     params: list = []
     if q:
-        sql += " AND (name LIKE ? OR index_slug LIKE ?)"
+        where_sql += " AND (name LIKE ? OR index_slug LIKE ?)"
         params += [f"%{q}%", f"%{q}%"]
     if cr_min is not None:
-        sql += " AND challenge_rating >= ?"
+        where_sql += " AND challenge_rating >= ?"
         params.append(cr_min)
     if cr_max is not None:
-        sql += " AND challenge_rating <= ?"
+        where_sql += " AND challenge_rating <= ?"
         params.append(cr_max)
     if type:
-        sql += " AND type = ?"
+        where_sql += " AND type = ?"
         params.append(type)
     if size:
-        sql += " AND size = ?"
+        where_sql += " AND size = ?"
         params.append(size)
-    sql += " ORDER BY name COLLATE NOCASE LIMIT ?"
-    params.append(limit)
 
     try:
         with get_srd_db() as db:
-            rows = db.execute(sql, params).fetchall()
+            count_sql = "SELECT COUNT(*)" + where_sql
+            total = db.execute(count_sql, params).fetchone()[0]
+
+            select_sql = (
+                "SELECT index_slug, name, hit_points, armor_class, challenge_rating, "
+                "       type, size, xp, dexterity "
+                + where_sql
+                + " ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
+            )
+            rows = db.execute(select_sql, params + [limit, offset]).fetchall()
     except sqlite3.OperationalError:
-        return {"items": []}
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
 
     return {
         "items": [
@@ -721,8 +726,62 @@ async def srd_monsters(
                 "dexterity": r["dexterity"],
             }
             for r in rows
-        ]
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
+
+
+ALLOWED_REF_COLLECTIONS = {
+    "conditions": "5e-SRD-Conditions.json",
+    "damage-types": "5e-SRD-Damage-Types.json",
+}
+
+
+@app.get("/api/srd/refs/{collection}")
+async def srd_refs(collection: str):
+    """Devuelve una lista con index y name de la colección solicitada.
+
+    Solo acepta 'conditions' y 'damage-types' (404 para otras colecciones).
+    """
+    if collection not in ALLOWED_REF_COLLECTIONS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Colección '{collection}' no encontrada. Solo se aceptan 'conditions' y 'damage-types'."
+        )
+
+    items = []
+    try:
+        with get_srd_db() as db:
+            rows = db.execute(
+                """
+                SELECT r.index_slug AS "index", r.name
+                FROM reference_entries r
+                JOIN collections c ON c.id = r.collection_id
+                WHERE c.slug = ?
+                ORDER BY r.name COLLATE NOCASE
+                """,
+                (collection,),
+            ).fetchall()
+            if rows:
+                items = [{"index": r["index"], "name": r["name"]} for r in rows]
+    except sqlite3.OperationalError:
+        pass
+
+    if not items:
+        srd_dir = getattr(config, "SRD_DIR", "")
+        json_path = os.path.join(srd_dir, ALLOWED_REF_COLLECTIONS[collection])
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r", encoding="utf-8") as fh:
+                    raw_items = json.load(fh)
+                    items = [{"index": x["index"], "name": x["name"]} for x in raw_items]
+                    items.sort(key=lambda x: x["name"].lower())
+            except Exception:
+                pass
+
+    return items
 
 
 @app.get("/api/srd/monsters/{index}")
