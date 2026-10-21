@@ -347,11 +347,20 @@ function renderList() {
       ? Math.max(0, Math.min(100, (c.hp_current / c.hp_max) * 100))
       : 0;
 
+    let goldBadge = "";
+    if (c.kind === "pc" && c.currency) {
+      const curr = c.currency;
+      const gp = curr.gp !== undefined ? curr.gp : 0;
+      const tooltip = `Monedas: ${curr.cp || 0} pc · ${curr.sp || 0} pp · ${curr.ep || 0} pe · ${curr.gp || 0} po · ${curr.pp || 0} pt`;
+      goldBadge = `<span class="gold-badge" title="${escapeHtml(tooltip)}">🪙 ${gp} po</span>`;
+    }
+
     row.innerHTML = `
       <div class="c-head">
         <span class="init">${c.initiative}</span>
         <span class="c-name">${escapeHtml(c.name)}</span>
         <span class="tag ${c.kind}">${c.kind === "pc" ? "PJ" : "ENEMIGO"}</span>
+        ${goldBadge}
         ${c.id === turnId ? '<span class="turn-tag">TURNO</span>' : ""}
       </div>
       <div class="hpbar"><div class="hpfill" style="width:${pct}%"></div></div>

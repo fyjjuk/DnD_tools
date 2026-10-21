@@ -17,6 +17,7 @@ Documento maestro del estado de desarrollo, fases completadas, fase activa y fas
 | **Fase 2.4.1** | **Iniciativa Interactiva y Superusuario** | ✅ Completada | Solicitud masiva de iniciativa (`initiative_requests`), tiradas de jugador en tiempo real, auto-tirada de NPCs, forzar/saltar/cancelar por DM y Superusuario, edición de fichas por DM. |
 | **Fase 2.4.2** | **Tiradas de Habilidad / Checks** | ✅ Completada | Solicitudes de tiradas de habilidad/característica por el DM con CD (Clase de Dificultad), 1d20 + modificador + competencia, soporte de Ventaja/Desventaja y Tiradas Secretas, resolución automática Éxito/Fallo. |
 | **Fase L1** | **Auditoría y Limpieza del Bridge Legacy** | ✅ Completada | Reconciliación total de datos Fase 1 a Fase 2 (espejo en `user_sessions`, sincronización `combatants.user_id`), desacoplamiento del hack `dm_token` en nuevas sesiones de campaña, autenticación dual por `X-User-Token` con fallback retrocompatible, script de auditoría idempotente `scripts/audit_legacy_bridge.py`. |
+| **Fase 2.4.4** | **Editor de Monedas y Riqueza** | ✅ Completada | Monedero D&D 5e (cp, sp, ep, gp, pp) en Mi Ficha con guardado silencioso (debounce 1s), visualización de oro en panel DM de combatientes con tooltip de desglose. |
 | **Fase 2.4.3** | **Tiradas de Salvación y Combate Avanzado** | 🟡 **SIGUIENTE** | Solicitud de tiros de salvación (Saving Throws) grupales/individuales con CD, resistencia a conjuros y daño directo asociado. |
 | **Fase 2.5** | **Gestión de Conjuros y Spell Slots** | ⏳ Pendiente | Tracking de espacios de conjuro por nivel, lanzamiento en combate, consumo de slots y resolución de daño/efecto (atiende deuda técnica I6). |
 | **Fase 2.6** | **Homebrew y Personalización** | ⏳ Pendiente | Edición y creación de monstruos, armas y objetos mágicos propios persistidos en `homebrew.db`. |
@@ -38,11 +39,11 @@ Las siguientes incidencias conocidas (*drifts*) están catalogadas y vinculadas 
 
 ---
 
-## 🎯 Última Implementación: Fase 2.4.2 (Tiradas de Habilidad / Checks)
+## 🎯 Última Implementación: Fase 2.4.4 (Editor de Monedas y Riqueza)
 
-Reutiliza la arquitectura reactiva WebSocket probada en la Fase 2.4.1 (`initiative_requests` / `initiative_rolls`):
-1. **Petición del DM:** El DM selecciona una habilidad (o característica pura) del SRD, una Clase de Dificultad (CD) y destinatarios (todos los PJs o específicos), con opciones de ventaja/desventaja y tirada secreta.
-2. **Respuesta del Jugador:** Modal reactivo con dado animado, suma automática del modificador y bono de competencia.
-3. **Resolución Automática:** Cálculo inmediato en backend: `Total = d20 + mod + (prof ? prof_bonus : 0)`. Evaluación de éxito (`Total >= CD`) o fallo (`Total < CD`).
-4. **Herramientas DM:** Forzar tirada aleatoria, "Toma 10" (salto rápido) o cancelar la solicitud en cualquier momento.
-5. **Verificación:** Suite de 11 tests automatizados en `scripts/verify_phase_2_4_2.py`.
+Sistema de gestión y seguimiento de tesoro para personajes:
+1. **Modelo de Datos en Backend:** 5 campos numéricos estándar (`cp`, `sp`, `ep`, `gp`, `pp`) normalizados dentro del objeto `currency` en el JSON `data` del personaje, con inicialización por defecto a 0 y descarte de negativos (`backend/app.py`).
+2. **Editor en Ficha de Jugador:** Sección visual temática en la pestaña *Mi Ficha* con 5 tarjetas responsivas, controles incrementales/decrementales (`+/-`) e inputs numéricos (`frontend/player.js`).
+3. **Guardado Silencioso Reactivo:** Persistencia automática mediante debounce de 1 segundo vía `PUT /api/characters/{id}` sin recargas de página ni disrupción de UX.
+4. **Visibilidad en Panel DM:** Insignia dorada `🪙 {gp} po` visible para el DM en cada combatiente PJ en `frontend/dm.js`, con tooltip detallado que desglosa las 5 monedas (`pc`, `pp`, `pe`, `po`, `pt`).
+5. **Verificación:** Suite de 8 tests automatizados en `scripts/verify_phase_2_4_4.py`.

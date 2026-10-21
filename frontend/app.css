@@ -431,6 +431,141 @@ input, select {
   border-radius: 99px;
 }
 
+/* Section header with right-aligned action/status */
+.sheet-section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.sheet-section-header-row .sheet-section-title {
+  margin-bottom: 0;
+}
+.currency-save-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  transition: opacity 0.2s ease;
+}
+.currency-save-status.saving {
+  color: #f59e0b;
+}
+.currency-save-status.saved {
+  color: #10b981;
+}
+.currency-save-status.error {
+  color: #ef4444;
+}
+
+/* 5 Currency Cards Grid */
+.sheet-currency-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (min-width: 580px) {
+  .sheet-currency-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+.currency-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s ease;
+}
+.currency-card:hover {
+  border-color: rgba(234, 179, 8, 0.4);
+}
+.currency-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.currency-icon {
+  font-size: 14px;
+}
+.currency-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.currency-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn-coin-step {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+.btn-coin-step:hover {
+  background: var(--panel);
+  border-color: var(--accent);
+  color: #fff;
+}
+.coin-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  padding: 0 4px;
+  -moz-appearance: textfield;
+}
+.coin-input::-webkit-outer-spin-button,
+.coin-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.coin-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Gold badge in combatant list for DM */
+.gold-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  color: #facc15;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  margin-left: 6px;
+  cursor: help;
+  vertical-align: middle;
+}
+
 /* Magic Overview Banner */
 .sheet-magic-banner {
   display: grid;

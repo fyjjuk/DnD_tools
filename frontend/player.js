@@ -486,6 +486,7 @@ function renderCharacterSheet(container, char) {
   const speed = d.speed || 30;
   const weapons = d.weapons || [];
   const spells = d.spells || [];
+  const curr = d.currency || { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 
   function fmtMod(v) {
     return v >= 0 ? `+${v}` : `${v}`;
@@ -562,6 +563,35 @@ function renderCharacterSheet(container, char) {
               <span class="ability-name">${s.key}</span>
               <span class="ability-mod">${fmtMod(s.mod)}</span>
               <span class="ability-score-pill">${s.score}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <!-- Monedas y Riqueza (Fase 2.4.4) -->
+      <div class="sheet-section">
+        <div class="sheet-section-header-row">
+          <h2 class="sheet-section-title">🪙 Monedas y Riqueza</h2>
+          <span id="currency-save-status" class="currency-save-status"></span>
+        </div>
+        <div class="sheet-currency-grid">
+          ${[
+            { key: "cp", name: "Cobre (cp)", icon: "🟤", val: curr.cp ?? 0 },
+            { key: "sp", name: "Plata (sp)", icon: "⚪", val: curr.sp ?? 0 },
+            { key: "ep", name: "Electro (ep)", icon: "🔵", val: curr.ep ?? 0 },
+            { key: "gp", name: "Oro (gp)", icon: "🟡", val: curr.gp ?? 0 },
+            { key: "pp", name: "Platino (pp)", icon: "🟣", val: curr.pp ?? 0 },
+          ].map((c) => `
+            <div class="currency-card">
+              <div class="currency-header">
+                <span class="currency-icon">${c.icon}</span>
+                <span class="currency-name">${c.name}</span>
+              </div>
+              <div class="currency-control">
+                <button type="button" class="btn-coin-step btn-coin-minus" data-coin="${c.key}" aria-label="Restar 1 ${c.name}">−</button>
+                <input type="number" id="coin-${c.key}" class="coin-input" data-coin="${c.key}" min="0" step="1" value="${c.val}">
+                <button type="button" class="btn-coin-step btn-coin-plus" data-coin="${c.key}" aria-label="Sumar 1 ${c.name}">+</button>
+              </div>
             </div>
           `).join("")}
         </div>
@@ -644,6 +674,7 @@ function renderCharacterSheet(container, char) {
   const selChar = $("sel-char");
   if (selChar) {
     selChar.addEventListener("change", () => {
+      if (currencySaveTimer) clearTimeout(currencySaveTimer);
       const chosen = userCharacters.find((c) => c.id === Number(selChar.value));
       if (chosen) {
         currentCharacter = chosen;
@@ -651,6 +682,107 @@ function renderCharacterSheet(container, char) {
       }
     });
   }
+
+  // Guardado silencioso de monedas con debounce de 1s
+  let currencySaveTimer = null;
+
+  function scheduleCurrencySave() {
+    const statusEl = $("currency-save-status");
+    if (statusEl) {
+      statusEl.textContent = "Guardando…";
+      statusEl.className = "currency-save-status saving";
+    }
+
+    clearTimeout(currencySaveTimer);
+    currencySaveTimer = setTimeout(async () => {
+      const userToken = localStorage.getItem("dnd_user_token");
+      if (!userToken) return;
+
+      const cp = Math.max(0, parseInt($("coin-cp")?.value, 10) || 0);
+      const sp = Math.max(0, parseInt($("coin-sp")?.value, 10) || 0);
+      const ep = Math.max(0, parseInt($("coin-ep")?.value, 10) || 0);
+      const gp = Math.max(0, parseInt($("coin-gp")?.value, 10) || 0);
+      const pp = Math.max(0, parseInt($("coin-pp")?.value, 10) || 0);
+
+      const newCurrency = { cp, sp, ep, gp, pp };
+      char.data = char.data || {};
+      char.data.currency = newCurrency;
+
+      const payload = {
+        name: char.name,
+        campaign_id: char.campaign_id,
+        level: char.level,
+        class_slug: char.class_slug,
+        race_slug: char.race_slug,
+        dex_mod: char.dex_mod,
+        hp_max: char.hp_max,
+        data: {
+          ...char.data,
+          currency: newCurrency,
+        },
+      };
+
+      try {
+        const updated = await API.put(`/api/characters/${char.id}`, payload, { "X-User-Token": userToken });
+        if (updated && updated.data) {
+          char.data = updated.data;
+          const idx = userCharacters.findIndex((c) => c.id === char.id);
+          if (idx !== -1) userCharacters[idx].data = updated.data;
+        }
+        if (statusEl) {
+          statusEl.textContent = "Guardado ✓";
+          statusEl.className = "currency-save-status saved";
+          setTimeout(() => {
+            if (statusEl.textContent === "Guardado ✓") {
+              statusEl.textContent = "";
+              statusEl.className = "currency-save-status";
+            }
+          }, 2000);
+        }
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = "Error al guardar";
+          statusEl.className = "currency-save-status error";
+        }
+        console.error("Error guardando monedas:", err);
+      }
+    }, 1000);
+  }
+
+  ["cp", "sp", "ep", "gp", "pp"].forEach((key) => {
+    const input = $(`coin-${key}`);
+    if (input) {
+      input.addEventListener("input", () => {
+        let val = parseInt(input.value, 10);
+        if (isNaN(val) || val < 0) {
+          if (input.value !== "") input.value = "0";
+        }
+        scheduleCurrencySave();
+      });
+      input.addEventListener("change", () => {
+        let val = parseInt(input.value, 10);
+        if (isNaN(val) || val < 0) val = 0;
+        input.value = val;
+        scheduleCurrencySave();
+      });
+    }
+  });
+
+  container.querySelectorAll(".btn-coin-step").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const coin = btn.dataset.coin;
+      const input = $(`coin-${coin}`);
+      if (!input) return;
+      let val = parseInt(input.value, 10) || 0;
+      if (btn.classList.contains("btn-coin-plus")) {
+        val += 1;
+      } else {
+        val = Math.max(0, val - 1);
+      }
+      input.value = val;
+      scheduleCurrencySave();
+    });
+  });
 
   const btnLink = $("btn-link-char");
   if (btnLink) {
@@ -853,9 +985,11 @@ async function renderCharacterForm(container, charToEdit) {
       race_slug: raceSlug,
       campaign_id: (playerInfo && playerInfo.campaign_id) || null,
       data: {
+        ...(charToEdit ? charToEdit.data : {}),
         stats: scores,
         weapons: weaponsList,
         spells: spellsList,
+        currency: (charToEdit && charToEdit.data && charToEdit.data.currency) || { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
       },
     };
 

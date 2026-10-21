@@ -223,6 +223,19 @@ def build_state(session, combatants, players, role, player_id):
     for c in ordered:
         is_me = role == "player" and c["player_id"] is not None and c["player_id"] == player_id
         show_hp = (role == "dm") or is_me
+
+        currency = None
+        c_keys = c.keys() if hasattr(c, "keys") else []
+        if "character_data" in c_keys and c["character_data"]:
+            try:
+                ch_data = json.loads(c["character_data"]) if isinstance(c["character_data"], str) else c["character_data"]
+                if isinstance(ch_data, dict):
+                    currency = ch_data.get("currency")
+            except Exception:
+                currency = None
+        elif "currency" in c_keys:
+            currency = c["currency"]
+
         out.append({
             "id": c["id"],
             "name": c["name"],
@@ -233,6 +246,7 @@ def build_state(session, combatants, players, role, player_id):
             "is_me": is_me,
             "hp_current": c["hp_current"] if show_hp else None,
             "hp_max": c["hp_max"] if show_hp else None,
+            "currency": currency if (role == "dm" or is_me) else None,
         })
     # FIX B1: incluir campaign_id + campaign_join_code en state.session
     # para que el modal Compartir de /dm pueda construir la URL con
@@ -369,7 +383,13 @@ async def broadcast_state(session_id: int):
         if session is None:
             return
         combatants = db.execute(
-            "SELECT * FROM combatants WHERE session_id=?", (session_id,)
+            """
+            SELECT c.*, ch.data AS character_data
+            FROM combatants c
+            LEFT JOIN characters ch ON c.character_id = ch.id
+            WHERE c.session_id=?
+            """,
+            (session_id,),
         ).fetchall()
         players = db.execute(
             "SELECT id, name FROM players WHERE session_id=? ORDER BY id", (session_id,)
@@ -2096,6 +2116,17 @@ def calculate_character_data(
     if "skill_proficiencies" not in data:
         data["skill_proficiencies"] = []
 
+    currency = data.get("currency")
+    if not isinstance(currency, dict):
+        currency = {}
+    data["currency"] = {
+        "cp": max(0, int(currency.get("cp") or 0)),
+        "sp": max(0, int(currency.get("sp") or 0)),
+        "ep": max(0, int(currency.get("ep") or 0)),
+        "gp": max(0, int(currency.get("gp") or 0)),
+        "pp": max(0, int(currency.get("pp") or 0)),
+    }
+
     return computed_dex_mod, computed_hp_max, data
 
 
@@ -2294,8 +2325,17 @@ async def characters_update(
         )
         # Sincronizar dex_mod en combatientes vinculados
         db.execute("UPDATE combatants SET dex_mod=? WHERE character_id=?", (dex_mod, char_id))
+        linked_sessions = db.execute("SELECT DISTINCT session_id FROM combatants WHERE character_id=?", (char_id,)).fetchall()
+        sids = [r["session_id"] for r in linked_sessions if r["session_id"]]
         updated = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
-        return _format_character_row(updated)
+
+    for sid in sids:
+        try:
+            await broadcast_state(sid)
+        except Exception:
+            pass
+
+    return _format_character_row(updated)
 
 
 @app.delete("/api/characters/{char_id}")
