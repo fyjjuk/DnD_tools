@@ -16,6 +16,10 @@ Cubre:
 12. Superusuario fuerza tirada de un jugador fuera de su campaña -> 200 OK + evento admin_action.
 13. Cancelación de request por cierre de sesión.
 14. Cache-busting ?v=2.4 en dm.html y player.html.
+
+NOTA DE COMPATIBILIDAD:
+Iniciativa interactiva requiere cuenta de campaña (v2). DM legacy
+en /dm recovery puede seguir usando el resto de features sin problema.
 """
 import asyncio
 import os
@@ -184,6 +188,7 @@ async def run_checks():
     assert super_edited["name"] == "PJ Solitario Bendecido"
     print("[OK   ] 6. Edición de ficha sin campaña por superusuario -> 200 OK")
 
+    # 7. Crear sesión de combate en Campaña 1 y solicitar iniciativa interactiva
     import secrets
     session_code = f"S{secrets.token_hex(2).upper()}"
     dm_session_token = f"dm_tok_{secrets.token_hex(4)}"

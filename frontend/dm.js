@@ -61,7 +61,7 @@ function renderInitiativeTracker() {
     return;
   }
   panel.classList.remove("hidden");
-  const userToken = localStorage.getItem("dnd_user_token") || dmToken;
+  const userToken = localStorage.getItem("dnd_user_token");
 
   let html = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -101,6 +101,7 @@ function renderInitiativeTracker() {
   panel.innerHTML = html;
 
   $("btn-cancel-init")?.addEventListener("click", async () => {
+    if (!userToken) return;
     try {
       await API.post("/api/initiative/cancel", { request_id: req.id }, { "X-User-Token": userToken });
     } catch (err) {
@@ -110,6 +111,7 @@ function renderInitiativeTracker() {
 
   panel.querySelectorAll("button[data-force]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!userToken) return;
       try {
         const cid = parseInt(btn.dataset.force, 10);
         await API.post("/api/initiative/force", { request_id: req.id, combatant_id: cid }, { "X-User-Token": userToken });
@@ -121,6 +123,7 @@ function renderInitiativeTracker() {
 
   panel.querySelectorAll("button[data-skip]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!userToken) return;
       try {
         const cid = parseInt(btn.dataset.skip, 10);
         await API.post("/api/initiative/skip", { request_id: req.id, combatant_id: cid }, { "X-User-Token": userToken });
@@ -141,6 +144,28 @@ function render() {
   banner.classList.toggle("hidden", active);
   if (!active) banner.textContent = "Sesión cerrada. Pulsa «Nueva sesión» para empezar otra.";
   $("btn-close").textContent = active ? "Cerrar sesión" : "Nueva sesión";
+
+  // Control para DM legacy (sesión sin campaña o sin token v2)
+  const isLegacy = !state.session.campaign_id;
+  const userToken = localStorage.getItem("dnd_user_token");
+  const btnInit = $("btn-roll-initiative");
+  const legacyNote = $("legacy-initiative-note");
+
+  if (btnInit) {
+    if (isLegacy || !userToken) {
+      btnInit.disabled = true;
+      btnInit.title = "Requiere cuenta de campaña";
+      btnInit.style.opacity = "0.5";
+      btnInit.style.cursor = "not-allowed";
+      if (legacyNote) legacyNote.classList.remove("hidden");
+    } else {
+      btnInit.disabled = false;
+      btnInit.title = "";
+      btnInit.style.opacity = "1";
+      btnInit.style.cursor = "pointer";
+      if (legacyNote) legacyNote.classList.add("hidden");
+    }
+  }
 
   renderInitiativeTracker();
   renderList();
@@ -349,7 +374,14 @@ $("add-form").addEventListener("submit", async (event) => {
 
 $("btn-roll-initiative")?.addEventListener("click", async () => {
   if (!state || !state.session || !state.session.id) return;
-  const userToken = localStorage.getItem("dnd_user_token") || dmToken;
+  const isLegacy = !state.session.campaign_id;
+  const userToken = localStorage.getItem("dnd_user_token");
+
+  if (isLegacy || !userToken) {
+    toast("Iniciativa requiere cuenta de campaña");
+    return;
+  }
+
   try {
     await API.post(
       `/api/sessions/${state.session.id}/initiative/request`,
