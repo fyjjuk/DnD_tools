@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jugador · Combate D&D 5e</title>
-<link rel="stylesheet" href="/static/app.css?v=2.3">
+<link rel="stylesheet" href="/static/app.css?v=2.4">
 </head>
 <body>
 
@@ -51,9 +51,21 @@
   </main>
 </div>
 
+<div id="initiative-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--panel);border:2px solid #8b5cf6;border-radius:12px;padding:24px;max-width:360px;width:100%;text-align:center">
+    <h2 style="margin:0 0 8px;color:#8b5cf6">🎲 ¡Tira Iniciativa!</h2>
+    <p id="init-modal-info" class="hp-text" style="margin-bottom:16px">El DM ha iniciado el combate. Tira tu d20 para determinar el turno.</p>
+    <div style="font-size:3rem;margin:16px 0" id="init-dice-display">🎲</div>
+    <div class="row-actions" style="justify-content:center;gap:12px">
+      <button id="btn-roll-d20" type="button" class="primary" style="background:#8b5cf6;padding:12px 24px;font-size:1.1rem">¡Tirar 1d20!</button>
+    </div>
+    <p id="init-modal-result" class="hp-text" style="margin-top:12px;font-weight:bold"></p>
+  </div>
+</div>
+
 <div id="player-redirect" class="hidden">Redirigiendo…</div>
 
-<script src="/static/common.js?v=2.3"></script>
-<script src="/static/player.js?v=2.3"></script>
+<script src="/static/common.js?v=2.4"></script>
+<script src="/static/player.js?v=2.4"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DM · Combate D&D 5e</title>
-<link rel="stylesheet" href="/static/app.css?v=2.3">
+<link rel="stylesheet" href="/static/app.css?v=2.4">
 </head>
 <body>
 
@@ -55,6 +55,7 @@
 
 <section class="panel">
   <div class="row-actions">
+    <button id="btn-roll-initiative" class="primary" style="background:#8b5cf6">🎲 Tirar Iniciativa</button>
     <button id="btn-next-turn" class="primary">Siguiente turno ▶</button>
     <button id="btn-next-round">Siguiente ronda ⏭</button>
     <button id="btn-recover">Recuperar sesión</button>
@@ -64,6 +65,7 @@
 
 <section class="panel">
   <h2>Orden de iniciativa</h2>
+  <div id="initiative-tracker" class="hidden" style="margin-bottom:12px;padding:12px;background:rgba(139,92,246,0.12);border:1px solid #8b5cf6;border-radius:8px"></div>
   <div id="combatants" class="combatants"></div>
 </section>
 
@@ -94,7 +96,7 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=2.3"></script>
-<script src="/static/dm.js?v=2.3"></script>
+<script src="/static/common.js?v=2.4"></script>
+<script src="/static/dm.js?v=2.4"></script>
 </body>
 </html>

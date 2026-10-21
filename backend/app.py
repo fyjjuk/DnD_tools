@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import os
+import random
 import re
 import secrets
 import socket
@@ -147,9 +148,48 @@ def build_state(session, combatants, players, role, player_id):
             ).fetchone()
             if row is not None:
                 campaign_join_code = row["join_code"]
+
+    active_req = None
+    with get_db() as db:
+        req = db.execute(
+            "SELECT * FROM initiative_requests WHERE session_id=? AND status='active' ORDER BY id DESC LIMIT 1",
+            (session["id"],),
+        ).fetchone()
+        if req is not None:
+            rolls = db.execute(
+                """SELECT r.*, c.name AS combatant_name, c.kind 
+                   FROM initiative_rolls r
+                   JOIN combatants c ON c.id = r.combatant_id
+                   WHERE r.request_id = ?
+                   ORDER BY r.id ASC""",
+                (req["id"],),
+            ).fetchall()
+            active_req = {
+                "id": req["id"],
+                "status": req["status"],
+                "created_at": req["created_at"],
+                "rolls": [
+                    {
+                        "id": r["id"],
+                        "combatant_id": r["combatant_id"],
+                        "combatant_name": r["combatant_name"],
+                        "kind": r["kind"],
+                        "user_id": r["user_id"],
+                        "status": r["status"],
+                        "dex_mod": r["dex_mod"],
+                        "roll_value": r["roll_value"],
+                        "total": r["total"],
+                    }
+                    for r in rolls
+                ],
+                "pending_count": sum(1 for r in rolls if r["status"] == "pending"),
+                "total_count": len(rolls),
+            }
+
     return {
         "type": "state",
         "session": {
+            "id": session["id"],
             "code": session["code"],
             "status": session["status"],
             "round": session["round"],
@@ -159,6 +199,7 @@ def build_state(session, combatants, players, role, player_id):
         },
         "combatants": out,
         "players": [{"id": p["id"], "name": p["name"]} for p in players],
+        "initiative_request": active_req,
     }
 
 
@@ -249,7 +290,16 @@ async def close_session(x_dm_token: Optional[str] = Header(None)):
         session = require_dm(db, x_dm_token)
         sid, code = session["id"], session["code"]
         log_event(db, sid, "session", "Sesion cerrada por el DM")
-        db.execute("UPDATE sessions SET status='closed', closed_at=? WHERE id=?", (now(), sid))
+        ts = now()
+        db.execute("UPDATE sessions SET status='closed', closed_at=? WHERE id=?", (ts, sid))
+        db.execute(
+            "UPDATE initiative_requests SET status='cancelled', closed_at=? WHERE session_id=? AND status='active'",
+            (ts, sid),
+        )
+        db.execute(
+            "UPDATE initiative_rolls SET status='cancelled' WHERE session_id=? AND status='pending'",
+            (sid,),
+        )
         events = db.execute(
             "SELECT * FROM events WHERE session_id=? ORDER BY id", (sid,)
         ).fetchall()
@@ -467,12 +517,16 @@ async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header
     kind = "enemy" if payload.kind == "enemy" else "pc"
     hp_max = max(1, int(hp_max))
 
+    dex_mod = 0
+    if srd is not None and srd["dexterity"] is not None:
+        dex_mod = (srd["dexterity"] - 10) // 2
+
     with get_db() as db:
         session = require_dm(db, x_dm_token)
         cur = db.execute(
-            "INSERT INTO combatants (session_id, name, hp_max, hp_current, initiative, kind, created_at) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (session["id"], name, hp_max, hp_max, int(payload.initiative), kind, now()),
+            "INSERT INTO combatants (session_id, name, hp_max, hp_current, initiative, kind, dex_mod, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (session["id"], name, hp_max, hp_max, int(payload.initiative), kind, dex_mod, now()),
         )
         cid = cur.lastrowid
 
@@ -1406,7 +1460,7 @@ async def auth_register(payload: RegisterIn):
 
 
 @app.post("/api/auth/login")
-async def auth_login(payload: LoginIn):
+async def auth_login(payload: LoginIn, request: Request = None):
     username = (payload.username or "").strip()
     password = payload.password or ""
     if not username or not password:
@@ -1417,6 +1471,19 @@ async def auth_login(payload: LoginIn):
             raise ApiError(401, "credenciales invalidas", "UNAUTHENTICATED")
         if not verify_password(password, user["password_hash"]):
             raise ApiError(401, "credenciales invalidas", "UNAUTHENTICATED")
+
+        if user["is_superuser"]:
+            client_ip = request.client.host if (request and request.client) else ""
+            allowed_ips = {"127.0.0.1", "::1", "localhost", "testclient"}
+            env_ips = os.getenv("DND_ADMIN_ALLOWED_IPS", "")
+            if env_ips:
+                for ip in env_ips.split(","):
+                    ip = ip.strip()
+                    if ip:
+                        allowed_ips.add(ip)
+            if client_ip not in allowed_ips:
+                raise ApiError(403, "acceso denegado para superusuario", "SUPERUSER_IP_FORBIDDEN")
+
         token, expires = create_user_session(db, user["id"])
         db.execute("UPDATE users SET last_seen_at=? WHERE id=?", (now(), user["id"]))
         uid = user["id"]
@@ -1450,6 +1517,7 @@ async def auth_me(x_user_token: Optional[str] = Header(None)):
         "username": user["username"],
         "display_name": user["display_name"],
         "is_guest": user["is_guest"],
+        "is_superuser": bool(user["is_superuser"]),
     }
 
 
@@ -1952,15 +2020,21 @@ async def characters_get(
         if row is None:
             raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
 
-        # Dueño o DM de la campaña
-        if row["user_id"] != user["id"]:
-            allowed = False
-            if row["campaign_id"]:
-                camp = db.execute("SELECT dm_user_id FROM campaigns WHERE id=?", (row["campaign_id"],)).fetchone()
-                if camp and camp["dm_user_id"] == user["id"]:
+        # Dueño, superusuario o DM de la campaña
+        allowed = (row["user_id"] == user["id"]) or bool(user["is_superuser"])
+        if not allowed and row["campaign_id"]:
+            camp = db.execute("SELECT dm_user_id FROM campaigns WHERE id=?", (row["campaign_id"],)).fetchone()
+            if camp and camp["dm_user_id"] == user["id"]:
+                allowed = True
+            else:
+                member = db.execute(
+                    "SELECT role FROM campaign_members WHERE campaign_id=? AND user_id=?",
+                    (row["campaign_id"], user["id"]),
+                ).fetchone()
+                if member and member["role"] == "dm":
                     allowed = True
-            if not allowed:
-                raise ApiError(403, "No tienes permiso para ver este personaje", "FORBIDDEN")
+        if not allowed:
+            raise ApiError(403, "No tienes permiso para ver este personaje", "FORBIDDEN")
 
         return _format_character_row(row)
 
@@ -1976,8 +2050,22 @@ async def characters_update(
         row = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
         if row is None:
             raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
-        if row["user_id"] != user["id"]:
-            raise ApiError(403, "Solo el dueño puede editar el personaje", "FORBIDDEN")
+
+        # Dueño, superusuario o DM de la campaña del personaje
+        allowed = (row["user_id"] == user["id"]) or bool(user["is_superuser"])
+        if not allowed and row["campaign_id"] is not None:
+            camp = db.execute("SELECT dm_user_id FROM campaigns WHERE id=?", (row["campaign_id"],)).fetchone()
+            if camp and camp["dm_user_id"] == user["id"]:
+                allowed = True
+            else:
+                member = db.execute(
+                    "SELECT role FROM campaign_members WHERE campaign_id=? AND user_id=?",
+                    (row["campaign_id"], user["id"]),
+                ).fetchone()
+                if member and member["role"] == "dm":
+                    allowed = True
+        if not allowed:
+            raise ApiError(403, "No tienes permiso para editar este personaje", "FORBIDDEN")
 
         name = (payload.name or "").strip()
         if not (1 <= len(name) <= 60):
@@ -2017,6 +2105,8 @@ async def characters_update(
                 char_id,
             ),
         )
+        # Sincronizar dex_mod en combatientes vinculados
+        db.execute("UPDATE combatants SET dex_mod=? WHERE character_id=?", (dex_mod, char_id))
         updated = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
         return _format_character_row(updated)
 
@@ -2031,7 +2121,8 @@ async def characters_delete(
         row = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
         if row is None:
             raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
-        if row["user_id"] != user["id"]:
+        allowed = (row["user_id"] == user["id"]) or bool(user["is_superuser"])
+        if not allowed:
             raise ApiError(403, "Solo el dueño puede eliminar el personaje", "FORBIDDEN")
 
         db.execute("DELETE FROM characters WHERE id=?", (char_id,))
@@ -2076,19 +2167,388 @@ async def link_my_character(
         comb = db.execute("SELECT * FROM combatants WHERE session_id=? AND player_id=?", (session["id"], player["id"])).fetchone()
         if comb:
             db.execute(
-                "UPDATE combatants SET character_id=?, name=?, hp_max=?, hp_current=? WHERE id=?",
-                (char["id"], char["name"], char["hp_max"], char["hp_max"], comb["id"]),
+                "UPDATE combatants SET character_id=?, name=?, hp_max=?, hp_current=?, dex_mod=?, user_id=? WHERE id=?",
+                (char["id"], char["name"], char["hp_max"], char["hp_max"], char["dex_mod"], user["id"], comb["id"]),
             )
             log_event(db, session["id"], "character", f"{player['name']} vinculó la ficha de {char['name']}")
         else:
             db.execute(
-                "UPDATE combatants SET character_id=? WHERE session_id=? AND lower(name)=lower(?)",
-                (char["id"], session["id"], char["name"]),
+                "UPDATE combatants SET character_id=?, dex_mod=?, user_id=? WHERE session_id=? AND lower(name)=lower(?)",
+                (char["id"], char["dex_mod"], user["id"], session["id"], char["name"]),
             )
         sid = session["id"]
 
     await broadcast_state(sid)
     return {"ok": True, "character": _format_character_row(char)}
+
+
+# ================================================================
+# Fase 2.4.1: Iniciativa interactiva
+# ================================================================
+
+class InitiativeRollIn(BaseModel):
+    request_id: int
+    combatant_id: int
+    roll_value: int
+
+
+class InitiativeActionIn(BaseModel):
+    request_id: int
+    combatant_id: int
+
+
+class InitiativeCancelIn(BaseModel):
+    request_id: int
+
+
+def check_is_session_dm_or_superuser(db, user, session):
+    """Devuelve (is_authorized, is_superuser_override).
+
+    Autorizado si:
+    - user['is_superuser'] == 1
+    - o user es el DM de la campaña de la sesión (campaign_members con role='dm' o campaigns.dm_user_id)
+    - o la sesión no tiene campaña y user['id'] == session['created_by_user_id']
+    """
+    is_super = bool(user["is_superuser"])
+    is_dm = False
+
+    camp_id = session["campaign_id"] if "campaign_id" in session.keys() else None
+    if camp_id is not None:
+        camp = db.execute("SELECT dm_user_id FROM campaigns WHERE id=?", (camp_id,)).fetchone()
+        if camp and camp["dm_user_id"] == user["id"]:
+            is_dm = True
+        else:
+            member = db.execute(
+                "SELECT role FROM campaign_members WHERE campaign_id=? AND user_id=?",
+                (camp_id, user["id"]),
+            ).fetchone()
+            if member and member["role"] == "dm":
+                is_dm = True
+    else:
+        created_by = session["created_by_user_id"] if "created_by_user_id" in session.keys() else None
+        if created_by == user["id"]:
+            is_dm = True
+
+    if is_dm:
+        return True, False
+    if is_super:
+        return True, True
+    return False, False
+
+
+@app.post("/api/sessions/{session_id}/initiative/request")
+async def initiative_request_create(
+    session_id: int,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if session is None or session["status"] != "active":
+            raise ApiError(400, "Sesión no encontrada o inactiva", "SESSION_NOT_ACTIVE")
+
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "No tienes permiso para iniciar la iniciativa", "FORBIDDEN")
+
+        ts = now()
+        db.execute(
+            "UPDATE initiative_requests SET status='cancelled', closed_at=? WHERE session_id=? AND status='active'",
+            (ts, session_id),
+        )
+        db.execute(
+            "UPDATE initiative_rolls SET status='cancelled' WHERE session_id=? AND status='pending'",
+            (session_id,),
+        )
+
+        cur = db.execute(
+            "INSERT INTO initiative_requests (session_id, status, created_by_user_id, created_at) "
+            "VALUES (?, 'active', ?, ?)",
+            (session_id, user["id"], ts),
+        )
+        req_id = cur.lastrowid
+
+        combatants = db.execute(
+            "SELECT * FROM combatants WHERE session_id=?", (session_id,)
+        ).fetchall()
+
+        for c in combatants:
+            if c["kind"] == "enemy":
+                r_val = random.randint(1, 20)
+                d_mod = c["dex_mod"] if c["dex_mod"] is not None else 0
+                tot = r_val + d_mod
+                db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, c["id"]))
+                db.execute(
+                    "INSERT INTO initiative_rolls (request_id, session_id, combatant_id, user_id, dex_mod, roll_value, total, status, rolled_at) "
+                    "VALUES (?, ?, ?, NULL, ?, ?, ?, 'rolled', ?)",
+                    (req_id, session_id, c["id"], d_mod, r_val, tot, ts),
+                )
+                log_event(db, session_id, "roll", f"{c['name']} (enemigo) tiró iniciativa: {r_val} + {d_mod} = {tot}")
+            else:
+                d_mod = c["dex_mod"] if c["dex_mod"] is not None else 0
+                uid = c["user_id"]
+                if c["character_id"]:
+                    char = db.execute("SELECT * FROM characters WHERE id=?", (c["character_id"],)).fetchone()
+                    if char:
+                        if char["dex_mod"] is not None:
+                            d_mod = char["dex_mod"]
+                        if char["user_id"]:
+                            uid = char["user_id"]
+                elif not uid and c["player_id"]:
+                    p_row = db.execute("SELECT token FROM players WHERE id=?", (c["player_id"],)).fetchone()
+                    if p_row:
+                        us_row = db.execute(
+                            "SELECT user_id FROM user_sessions WHERE token=?", (p_row["token"],)
+                        ).fetchone()
+                        if us_row:
+                            uid = us_row["user_id"]
+
+                db.execute(
+                    "INSERT INTO initiative_rolls (request_id, session_id, combatant_id, user_id, dex_mod, roll_value, total, status, rolled_at) "
+                    "VALUES (?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL)",
+                    (req_id, session_id, c["id"], uid, d_mod),
+                )
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM initiative_rolls WHERE request_id=? AND status='pending'",
+            (req_id,),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE initiative_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req_id),
+            )
+
+        if is_admin_override:
+            log_event(db, session_id, "admin_action", f"Superusuario '{user['username']}' inició tirada de iniciativa")
+        else:
+            log_event(db, session_id, "combat", "Tirada de iniciativa iniciada por el DM")
+
+    await broadcast_state(session_id)
+    return {"ok": True, "request_id": req_id}
+
+
+@app.post("/api/initiative/roll")
+async def initiative_roll_submit(
+    payload: InitiativeRollIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    if not (1 <= payload.roll_value <= 20):
+        raise ApiError(400, "Tirada inválida (debe estar entre 1 y 20)", "INVALID_ROLL")
+
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        roll = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (payload.request_id, payload.combatant_id),
+        ).fetchone()
+        if roll is None:
+            raise ApiError(404, "Tirada no encontrada", "NOT_FOUND")
+
+        req = db.execute("SELECT * FROM initiative_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None or req["status"] != "active":
+            raise ApiError(400, "La solicitud de iniciativa no está activa", "REQUEST_NOT_ACTIVE")
+
+        if roll["status"] != "pending":
+            raise ApiError(409, "Esta tirada ya fue enviada o resuelta", "ALREADY_ROLLED")
+
+        c = db.execute("SELECT * FROM combatants WHERE id=?", (payload.combatant_id,)).fetchone()
+        if c is None:
+            raise ApiError(404, "Combatiente no encontrado", "NOT_FOUND")
+
+        allowed = bool(user["is_superuser"])
+        if not allowed:
+            if roll["user_id"] == user["id"] or c["user_id"] == user["id"]:
+                allowed = True
+            elif c["character_id"]:
+                char = db.execute("SELECT user_id FROM characters WHERE id=?", (c["character_id"],)).fetchone()
+                if char and char["user_id"] == user["id"]:
+                    allowed = True
+            elif c["player_id"]:
+                p_row = db.execute("SELECT token FROM players WHERE id=?", (c["player_id"],)).fetchone()
+                if p_row:
+                    us_row = db.execute(
+                        "SELECT user_id FROM user_sessions WHERE token=?", (p_row["token"],)
+                    ).fetchone()
+                    if us_row and us_row["user_id"] == user["id"]:
+                        allowed = True
+        if not allowed:
+            raise ApiError(403, "No tienes permiso para tirar por este combatiente", "FORBIDDEN")
+
+        d_mod = roll["dex_mod"]
+        tot = payload.roll_value + d_mod
+        ts = now()
+        db.execute(
+            "UPDATE initiative_rolls SET roll_value=?, total=?, status='rolled', rolled_at=? WHERE id=?",
+            (payload.roll_value, tot, ts, roll["id"]),
+        )
+        db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, payload.combatant_id))
+        log_event(db, req["session_id"], "roll", f"{c['name']} tiró iniciativa: {payload.roll_value} + {d_mod} = {tot}")
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM initiative_rolls WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE initiative_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req["id"]),
+            )
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True, "total": tot, "roll_value": payload.roll_value, "dex_mod": d_mod}
+
+
+@app.post("/api/initiative/force")
+async def initiative_roll_force(
+    payload: InitiativeActionIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        roll = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (payload.request_id, payload.combatant_id),
+        ).fetchone()
+        if roll is None:
+            raise ApiError(404, "Tirada no encontrada", "NOT_FOUND")
+
+        req = db.execute("SELECT * FROM initiative_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None or req["status"] != "active":
+            raise ApiError(400, "La solicitud de iniciativa no está activa", "REQUEST_NOT_ACTIVE")
+
+        if roll["status"] != "pending":
+            raise ApiError(409, "Esta tirada ya fue resuelta", "ALREADY_ROLLED")
+
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (req["session_id"],)).fetchone()
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "Solo el DM o un superusuario pueden forzar tiradas", "FORBIDDEN")
+
+        c = db.execute("SELECT * FROM combatants WHERE id=?", (payload.combatant_id,)).fetchone()
+        c_name = c["name"] if c else "Combatiente"
+        r_val = random.randint(1, 20)
+        d_mod = roll["dex_mod"]
+        tot = r_val + d_mod
+        ts = now()
+        db.execute(
+            "UPDATE initiative_rolls SET roll_value=?, total=?, status='forced', rolled_at=? WHERE id=?",
+            (r_val, tot, ts, roll["id"]),
+        )
+        db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, payload.combatant_id))
+
+        if is_admin_override:
+            log_event(db, req["session_id"], "admin_action", f"Superusuario '{user['username']}' forzó tirada de {c_name}: {r_val} + {d_mod} = {tot}")
+        else:
+            log_event(db, req["session_id"], "roll", f"DM forzó tirada de {c_name}: {r_val} + {d_mod} = {tot}")
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM initiative_rolls WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE initiative_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req["id"]),
+            )
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True, "total": tot, "roll_value": r_val, "dex_mod": d_mod}
+
+
+@app.post("/api/initiative/skip")
+async def initiative_roll_skip(
+    payload: InitiativeActionIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        roll = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (payload.request_id, payload.combatant_id),
+        ).fetchone()
+        if roll is None:
+            raise ApiError(404, "Tirada no encontrada", "NOT_FOUND")
+
+        req = db.execute("SELECT * FROM initiative_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None or req["status"] != "active":
+            raise ApiError(400, "La solicitud de iniciativa no está activa", "REQUEST_NOT_ACTIVE")
+
+        if roll["status"] != "pending":
+            raise ApiError(409, "Esta tirada ya fue resuelta", "ALREADY_ROLLED")
+
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (req["session_id"],)).fetchone()
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "Solo el DM o un superusuario pueden saltar tiradas", "FORBIDDEN")
+
+        c = db.execute("SELECT * FROM combatants WHERE id=?", (payload.combatant_id,)).fetchone()
+        c_name = c["name"] if c else "Combatiente"
+        d_mod = roll["dex_mod"]
+        tot = 10 + d_mod
+        ts = now()
+        db.execute(
+            "UPDATE initiative_rolls SET roll_value=10, total=?, status='skipped', rolled_at=? WHERE id=?",
+            (tot, ts, roll["id"]),
+        )
+        db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, payload.combatant_id))
+
+        if is_admin_override:
+            log_event(db, req["session_id"], "admin_action", f"Superusuario '{user['username']}' saltó tirada (toma 10) de {c_name}: 10 + {d_mod} = {tot}")
+        else:
+            log_event(db, req["session_id"], "roll", f"DM saltó tirada (toma 10) de {c_name}: 10 + {d_mod} = {tot}")
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM initiative_rolls WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE initiative_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req["id"]),
+            )
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True, "total": tot, "roll_value": 10, "dex_mod": d_mod}
+
+
+@app.post("/api/initiative/cancel")
+async def initiative_request_cancel(
+    payload: InitiativeCancelIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        req = db.execute("SELECT * FROM initiative_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None:
+            raise ApiError(404, "Solicitud no encontrada", "NOT_FOUND")
+
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (req["session_id"],)).fetchone()
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "Solo el DM o un superusuario pueden cancelar la iniciativa", "FORBIDDEN")
+
+        ts = now()
+        db.execute(
+            "UPDATE initiative_requests SET status='cancelled', closed_at=? WHERE id=?",
+            (ts, req["id"]),
+        )
+        db.execute(
+            "UPDATE initiative_rolls SET status='cancelled' WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        )
+
+        if is_admin_override:
+            log_event(db, req["session_id"], "admin_action", f"Superusuario '{user['username']}' canceló la iniciativa")
+        else:
+            log_event(db, req["session_id"], "system", "Tirada de iniciativa cancelada por el DM")
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True}
 
 
 # ================================================================

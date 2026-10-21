@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS combatants (
     hp_max      INTEGER NOT NULL,
     hp_current  INTEGER NOT NULL,
     initiative  INTEGER NOT NULL,
+    dex_mod     INTEGER DEFAULT 0,
     kind        TEXT NOT NULL,
     player_id   INTEGER REFERENCES players(id) ON DELETE SET NULL,
     created_at  TEXT NOT NULL
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name       TEXT NOT NULL,
     password_hash      TEXT,
     is_guest           INTEGER NOT NULL DEFAULT 0,
+    is_superuser       INTEGER NOT NULL DEFAULT 0,
     claimed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at         TEXT NOT NULL,
     last_seen_at       TEXT
@@ -149,6 +151,32 @@ CREATE TABLE IF NOT EXISTS session_comments (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_session_comments_session ON session_comments(session_id);
+
+CREATE TABLE IF NOT EXISTS initiative_requests (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id         INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    status             TEXT NOT NULL DEFAULT 'active',
+    created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+    created_at         TEXT NOT NULL,
+    closed_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_initiative_requests_session ON initiative_requests(session_id);
+
+CREATE TABLE IF NOT EXISTS initiative_rolls (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id    INTEGER NOT NULL REFERENCES initiative_requests(id) ON DELETE CASCADE,
+    session_id    INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    combatant_id  INTEGER NOT NULL REFERENCES combatants(id) ON DELETE CASCADE,
+    user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    dex_mod       INTEGER NOT NULL DEFAULT 0,
+    roll_value    INTEGER,
+    total         INTEGER,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    rolled_at     TEXT,
+    UNIQUE(request_id, combatant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_initiative_rolls_request ON initiative_rolls(request_id);
+CREATE INDEX IF NOT EXISTS idx_initiative_rolls_combatant ON initiative_rolls(combatant_id);
 """
 
 SCHEMA_SRD = """
@@ -346,7 +374,7 @@ CREATE INDEX IF NOT EXISTS idx_homebrew_monsters_name ON monsters(name COLLATE N
 
 
 def _migrate_v2_columns(conn):
-    """Anade columnas nuevas a sessions/combatants (idempotente)."""
+    """Anade columnas nuevas a sessions/combatants/users (idempotente)."""
     cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
     if "campaign_id" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)")
@@ -357,6 +385,11 @@ def _migrate_v2_columns(conn):
         conn.execute("ALTER TABLE combatants ADD COLUMN user_id INTEGER REFERENCES users(id)")
     if "character_id" not in cols:
         conn.execute("ALTER TABLE combatants ADD COLUMN character_id INTEGER REFERENCES characters(id)")
+    if "dex_mod" not in cols:
+        conn.execute("ALTER TABLE combatants ADD COLUMN dex_mod INTEGER DEFAULT 0")
+    cols_users = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "is_superuser" not in cols_users:
+        conn.execute("ALTER TABLE users ADD COLUMN is_superuser INTEGER NOT NULL DEFAULT 0")
 
 
 def _connect():

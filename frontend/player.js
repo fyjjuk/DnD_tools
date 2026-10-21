@@ -124,6 +124,81 @@ function render() {
 
   renderMe();
   renderList();
+  renderInitiativeModal();
+}
+
+let rollingInitiative = false;
+
+function renderInitiativeModal() {
+  const modal = $("initiative-modal");
+  if (!modal) return;
+  const req = state.initiative_request;
+  if (!req || req.status !== "active") {
+    modal.classList.add("hidden");
+    rollingInitiative = false;
+    return;
+  }
+
+  // Buscar si mi combatiente tiene tirada pendiente
+  const myCombatant = state.combatants.find(c => c.is_me);
+  if (!myCombatant) {
+    modal.classList.add("hidden");
+    return;
+  }
+
+  const myRoll = req.rolls ? req.rolls.find(r => r.combatant_id === myCombatant.id) : null;
+  if (!myRoll || myRoll.status !== "pending") {
+    modal.classList.add("hidden");
+    rollingInitiative = false;
+    return;
+  }
+
+  modal.classList.remove("hidden");
+  $("init-modal-info").textContent = `¡El DM ha pedido iniciativa! Tira 1d20 para ${myCombatant.name} (Mod DES: ${myRoll.dex_mod >= 0 ? '+' : ''}${myRoll.dex_mod})`;
+  $("init-modal-result").textContent = "";
+  const btn = $("btn-roll-d20");
+  btn.disabled = rollingInitiative;
+
+  btn.onclick = async () => {
+    if (rollingInitiative) return;
+    rollingInitiative = true;
+    btn.disabled = true;
+
+    const diceDisplay = $("init-dice-display");
+    const faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+    let animCount = 0;
+    const interval = setInterval(() => {
+      diceDisplay.textContent = faces[Math.floor(Math.random() * faces.length)];
+      animCount++;
+      if (animCount > 10) clearInterval(interval);
+    }, 80);
+
+    setTimeout(async () => {
+      const rollValue = Math.floor(Math.random() * 20) + 1;
+      diceDisplay.textContent = `🎲 ${rollValue}`;
+      const userToken = localStorage.getItem("dnd_user_token");
+      try {
+        const res = await API.post(
+          "/api/initiative/roll",
+          {
+            request_id: req.id,
+            combatant_id: myCombatant.id,
+            roll_value: rollValue,
+          },
+          { "X-User-Token": userToken || "" }
+        );
+        $("init-modal-result").textContent = `Resultado: ${rollValue} + ${res.dex_mod} = ${res.total}`;
+        setTimeout(() => {
+          modal.classList.add("hidden");
+          rollingInitiative = false;
+        }, 1200);
+      } catch (err) {
+        $("init-modal-result").textContent = "Error: " + err.message;
+        rollingInitiative = false;
+        btn.disabled = false;
+      }
+    }, 900);
+  };
 }
 
 function renderMe() {

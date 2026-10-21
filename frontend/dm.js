@@ -51,6 +51,86 @@ function openSocket() {
   });
 }
 
+function renderInitiativeTracker() {
+  const panel = $("initiative-tracker");
+  if (!panel) return;
+  const req = state.initiative_request;
+  if (!req || req.status !== "active") {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  panel.classList.remove("hidden");
+  const userToken = localStorage.getItem("dnd_user_token") || dmToken;
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong>🎲 Tirada de Iniciativa en curso (${req.pending_count} pendiente${req.pending_count === 1 ? '' : 's'})</strong>
+      <button id="btn-cancel-init" class="danger small" type="button">Cancelar</button>
+    </div>
+    <div style="display:grid;gap:6px">
+  `;
+
+  for (const r of req.rolls) {
+    const isPending = r.status === "pending";
+    const statusLabel = r.status === "rolled"
+      ? `<span style="color:#10b981">✓ Tiró: ${r.roll_value} + ${r.dex_mod} = <strong>${r.total}</strong></span>`
+      : r.status === "forced"
+      ? `<span style="color:#f59e0b">✓ Forzado: ${r.roll_value} + ${r.dex_mod} = <strong>${r.total}</strong></span>`
+      : r.status === "skipped"
+      ? `<span style="color:#9ca3af">✓ Toma 10: 10 + ${r.dex_mod} = <strong>${r.total}</strong></span>`
+      : `<span style="color:#8b5cf6">⏳ Esperando tirada (DES ${r.dex_mod >= 0 ? '+' : ''}${r.dex_mod})</span>`;
+
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg);padding:6px 10px;border-radius:6px;border:1px solid var(--border)">
+        <div>
+          <strong>${escapeHtml(r.combatant_name)}</strong>
+          <span class="tag ${r.kind}" style="margin-left:6px">${r.kind === 'pc' ? 'PJ' : 'ENEMIGO'}</span>
+          <span style="margin-left:10px">${statusLabel}</span>
+        </div>
+        ${isPending ? `
+          <div style="display:flex;gap:6px">
+            <button class="small" data-force="${r.combatant_id}" style="background:#8b5cf6;color:#fff">Forzar d20</button>
+            <button class="small" data-skip="${r.combatant_id}">Toma 10</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
+
+  $("btn-cancel-init")?.addEventListener("click", async () => {
+    try {
+      await API.post("/api/initiative/cancel", { request_id: req.id }, { "X-User-Token": userToken });
+    } catch (err) {
+      alert("Error al cancelar iniciativa: " + err.message);
+    }
+  });
+
+  panel.querySelectorAll("button[data-force]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        const cid = parseInt(btn.dataset.force, 10);
+        await API.post("/api/initiative/force", { request_id: req.id, combatant_id: cid }, { "X-User-Token": userToken });
+      } catch (err) {
+        alert("Error al forzar tirada: " + err.message);
+      }
+    });
+  });
+
+  panel.querySelectorAll("button[data-skip]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        const cid = parseInt(btn.dataset.skip, 10);
+        await API.post("/api/initiative/skip", { request_id: req.id, combatant_id: cid }, { "X-User-Token": userToken });
+      } catch (err) {
+        alert("Error al saltar tirada: " + err.message);
+      }
+    });
+  });
+}
+
 function render() {
   if (!state) return;
   $("session-code").textContent = state.session.code;
@@ -62,6 +142,7 @@ function render() {
   if (!active) banner.textContent = "Sesión cerrada. Pulsa «Nueva sesión» para empezar otra.";
   $("btn-close").textContent = active ? "Cerrar sesión" : "Nueva sesión";
 
+  renderInitiativeTracker();
   renderList();
 }
 
@@ -264,6 +345,20 @@ $("add-form").addEventListener("submit", async (event) => {
     $("f-srd-index").value = "";
     $("f-name").focus();
   } catch (err) { toast(err.message); }
+});
+
+$("btn-roll-initiative")?.addEventListener("click", async () => {
+  if (!state || !state.session || !state.session.id) return;
+  const userToken = localStorage.getItem("dnd_user_token") || dmToken;
+  try {
+    await API.post(
+      `/api/sessions/${state.session.id}/initiative/request`,
+      {},
+      { "X-User-Token": userToken }
+    );
+  } catch (err) {
+    alert("Error al iniciar iniciativa: " + err.message);
+  }
 });
 
 $("btn-next-turn").addEventListener("click", () => turnAction("/api/turn/next"));
