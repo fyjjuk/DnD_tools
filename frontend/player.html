@@ -32,13 +32,24 @@
     </div>
   </header>
 
-  <div id="p-turn" class="turn-banner">Esperando inicio del combate…</div>
-  <div id="p-me" class="me-panel"></div>
+  <nav class="nav-tabs" style="display:flex;background:var(--panel-2);border-bottom:1px solid var(--border);">
+    <button id="tab-combat" class="tab-btn active" type="button" style="flex:1;border-radius:0;border:none;border-bottom:3px solid var(--accent);background:transparent;padding:12px;font-weight:700;">⚔️ Combate</button>
+    <button id="tab-sheet" class="tab-btn" type="button" style="flex:1;border-radius:0;border:none;border-bottom:3px solid transparent;background:transparent;padding:12px;font-weight:700;color:var(--muted);">📜 Mi Ficha</button>
+  </nav>
 
-  <section class="panel">
-    <h2>Orden de iniciativa</h2>
-    <div id="p-list" class="combatants"></div>
-  </section>
+  <main id="pane-combat">
+    <div id="p-turn" class="turn-banner">Esperando inicio del combate…</div>
+    <div id="p-me" class="me-panel"></div>
+
+    <section class="panel">
+      <h2>Orden de iniciativa</h2>
+      <div id="p-list" class="combatants"></div>
+    </section>
+  </main>
+
+  <main id="pane-sheet" class="hidden">
+    <div id="sheet-content"></div>
+  </main>
 </div>
 
 <div id="player-redirect" class="hidden">Redirigiendo…</div>

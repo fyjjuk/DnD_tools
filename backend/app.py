@@ -7,7 +7,7 @@ import re
 import secrets
 import socket
 import sqlite3
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
@@ -270,7 +270,7 @@ async def close_session(x_dm_token: Optional[str] = Header(None)):
 # ---------------------------------------------------------------- jugadores
 
 @app.post("/api/join")
-async def join(payload: JoinIn):
+async def join(payload: JoinIn, x_user_token: Optional[str] = Header(None)):
     code = payload.code.strip().upper()
     name = payload.name.strip()
     if not name or len(name) > 40:
@@ -281,12 +281,32 @@ async def join(payload: JoinIn):
         if session is None or session["code"] != code:
             raise HTTPException(status_code=404, detail="Codigo de sesion invalido")
 
+        # Verificar si quien entra tiene una cuenta registrada
+        user = None
+        if x_user_token:
+            try:
+                u_cand = require_user(db, x_user_token)
+                if u_cand and not u_cand["is_guest"]:
+                    user = u_cand
+            except Exception:
+                user = None
+
         existing = db.execute(
             "SELECT * FROM players WHERE session_id=? AND lower(name)=lower(?)",
             (session["id"], name),
         ).fetchone()
         if existing:
             player = existing
+            if user:
+                ensure_user_session(db, user["id"], player["token"], now())
+                db.execute(
+                    "INSERT OR IGNORE INTO session_participants (session_id, user_id, joined_at) VALUES (?,?,?)",
+                    (session["id"], user["id"], now()),
+                )
+                db.execute(
+                    "UPDATE combatants SET user_id=? WHERE session_id=? AND player_id=?",
+                    (user["id"], session["id"], player["id"]),
+                )
         else:
             token = secrets.token_urlsafe(24)
             cur = db.execute(
@@ -295,27 +315,32 @@ async def join(payload: JoinIn):
             )
             player = db.execute("SELECT * FROM players WHERE id=?", (cur.lastrowid,)).fetchone()
             log_event(db, session["id"], "player", f"{name} se unio")
-            # Bridge v2: crear user guest + user_session + session_participant.
-            uname = f"{slugify(name)}_{player['id']}"
-            if db.execute("SELECT 1 FROM users WHERE username=?", (uname,)).fetchone():
-                uname = f"{uname}_p{player['id']}"
-            ucur = db.execute(
-                "INSERT INTO users (username, display_name, is_guest, created_at) "
-                "VALUES (?,?,1,?)",
-                (uname, name, player["created_at"]),
-            )
-            guest_uid = ucur.lastrowid
-            ensure_user_session(db, guest_uid, player["token"], player["created_at"])
+
+            if user:
+                target_uid = user["id"]
+            else:
+                # Bridge v2: crear user guest + user_session + session_participant.
+                uname = f"{slugify(name)}_{player['id']}"
+                if db.execute("SELECT 1 FROM users WHERE username=?", (uname,)).fetchone():
+                    uname = f"{uname}_p{player['id']}"
+                ucur = db.execute(
+                    "INSERT INTO users (username, display_name, is_guest, created_at) "
+                    "VALUES (?,?,1,?)",
+                    (uname, name, player["created_at"]),
+                )
+                target_uid = ucur.lastrowid
+
+            ensure_user_session(db, target_uid, player["token"], player["created_at"])
             db.execute(
                 "INSERT OR IGNORE INTO session_participants (session_id, user_id, joined_at) "
                 "VALUES (?,?,?)",
-                (session["id"], guest_uid, player["created_at"]),
+                (session["id"], target_uid, player["created_at"]),
             )
             # auto-vinculo con un PJ del mismo nombre que aun no tenga jugador
             db.execute(
                 "UPDATE combatants SET player_id=?, user_id=? "
                 "WHERE session_id=? AND kind='pc' AND player_id IS NULL AND lower(name)=lower(?)",
-                (player["id"], guest_uid, session["id"], name),
+                (player["id"], target_uid, session["id"], name),
             )
             await broadcast_state(session["id"])
 
@@ -329,7 +354,7 @@ async def join(payload: JoinIn):
 
 
 @app.get("/api/player/me")
-async def player_me(x_player_token: Optional[str] = Header(None)):
+async def player_me(x_player_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
         player = db.execute("SELECT * FROM players WHERE token=?", (x_player_token,)).fetchone()
         if player is None:
@@ -337,11 +362,53 @@ async def player_me(x_player_token: Optional[str] = Header(None)):
         session = db.execute("SELECT * FROM sessions WHERE id=?", (player["session_id"],)).fetchone()
         if session is None or session["status"] != "active":
             raise HTTPException(status_code=404, detail="Sesion cerrada")
+
+        user_info = None
+        if x_user_token:
+            u_row = db.execute(
+                "SELECT u.id, u.username, u.display_name, u.is_guest "
+                "FROM user_sessions s JOIN users u ON u.id = s.user_id "
+                "WHERE s.token = ? AND s.revoked_at IS NULL AND s.expires_at > ?",
+                (x_user_token, now()),
+            ).fetchone()
+            if u_row:
+                user_info = {
+                    "id": u_row["id"],
+                    "username": u_row["username"],
+                    "display_name": u_row["display_name"],
+                    "is_guest": bool(u_row["is_guest"]),
+                }
+
+        if not user_info:
+            us = db.execute(
+                "SELECT u.id, u.username, u.display_name, u.is_guest "
+                "FROM user_sessions s JOIN users u ON u.id = s.user_id "
+                "WHERE s.token = ? AND s.revoked_at IS NULL AND s.expires_at > ?",
+                (x_player_token, now()),
+            ).fetchone()
+            if us:
+                user_info = {
+                    "id": us["id"],
+                    "username": us["username"],
+                    "display_name": us["display_name"],
+                    "is_guest": bool(us["is_guest"]),
+                }
+
+        comb = db.execute(
+            "SELECT character_id FROM combatants WHERE session_id=? AND player_id=? LIMIT 1",
+            (session["id"], player["id"]),
+        ).fetchone()
+        character_id = comb["character_id"] if comb else None
+
+    campaign_id = session["campaign_id"] if "campaign_id" in session.keys() else None
     return {
         "player_id": player["id"],
         "name": player["name"],
         "session_id": session["id"],
         "code": session["code"],
+        "campaign_id": campaign_id,
+        "user": user_info,
+        "character_id": character_id,
     }
 
 
@@ -1645,6 +1712,383 @@ async def campaigns_list_sessions(campaign_id: int,
             for s in sessions
         ]
     }
+
+
+# ================================================================
+# Fase 2.3: Personajes (Mini-ficha) y endpoints CRUD
+# ================================================================
+
+class CharacterIn(BaseModel):
+    name: str
+    campaign_id: Optional[int] = None
+    level: Optional[int] = 1
+    class_slug: Optional[str] = None
+    race_slug: Optional[str] = None
+    dex_mod: Optional[int] = None
+    hp_max: Optional[int] = None
+    data: Optional[Dict[str, Any]] = None
+
+
+class LinkCharacterIn(BaseModel):
+    character_id: int
+
+
+def calculate_character_data(
+    level: int,
+    class_slug: Optional[str],
+    race_slug: Optional[str],
+    dex_mod: Optional[int],
+    hp_max: Optional[int],
+    data: Optional[Dict[str, Any]],
+):
+    data = dict(data) if data else {}
+    stats = data.get("stats") or {}
+    scores = {
+        "strength": int(stats.get("strength", 10)),
+        "dexterity": int(stats.get("dexterity", 10)),
+        "constitution": int(stats.get("constitution", 10)),
+        "intelligence": int(stats.get("intelligence", 10)),
+        "wisdom": int(stats.get("wisdom", 10)),
+        "charisma": int(stats.get("charisma", 10)),
+    }
+    modifiers = {
+        "str_mod": (scores["strength"] - 10) // 2,
+        "dex_mod": (scores["dexterity"] - 10) // 2,
+        "con_mod": (scores["constitution"] - 10) // 2,
+        "int_mod": (scores["intelligence"] - 10) // 2,
+        "wis_mod": (scores["wisdom"] - 10) // 2,
+        "cha_mod": (scores["charisma"] - 10) // 2,
+    }
+    computed_dex_mod = dex_mod if dex_mod is not None else modifiers["dex_mod"]
+    prof_bonus = ((level - 1) // 4) + 2
+
+    # Class data from SRD
+    hit_die = 8
+    spellcasting_ability = None
+    class_name = None
+    if class_slug:
+        try:
+            with get_srd_db() as sdb:
+                crow = sdb.execute(
+                    "SELECT name, hit_die, spellcasting_ability_slug FROM classes WHERE index_slug=?",
+                    (class_slug,),
+                ).fetchone()
+                if crow:
+                    class_name = crow["name"]
+                    if crow["hit_die"]:
+                        hit_die = crow["hit_die"]
+                    spellcasting_ability = crow["spellcasting_ability_slug"]
+        except Exception:
+            pass
+
+    # Race data from SRD
+    speed = data.get("speed", 30)
+    size = data.get("size", "Mediano")
+    race_name = None
+    if race_slug:
+        try:
+            with get_srd_db() as sdb:
+                rrow = sdb.execute(
+                    "SELECT name, speed, size FROM races WHERE index_slug=?",
+                    (race_slug,),
+                ).fetchone()
+                if rrow:
+                    race_name = rrow["name"]
+                    if rrow["speed"]:
+                        speed = rrow["speed"]
+                    if rrow["size"]:
+                        size = rrow["size"]
+        except Exception:
+            pass
+
+    computed_hp_max = hp_max
+    if not computed_hp_max or computed_hp_max <= 0:
+        con_mod = modifiers["con_mod"]
+        computed_hp_max = hit_die + con_mod + max(0, level - 1) * max(1, (hit_die // 2 + 1 + con_mod))
+        computed_hp_max = max(1, computed_hp_max)
+
+    base_ac = data.get("armor_class")
+    if base_ac is None:
+        base_ac = 10 + computed_dex_mod
+
+    spell_dc = None
+    spell_attack_bonus = None
+    if spellcasting_ability:
+        ability_mod_key = f"{spellcasting_ability[:3]}_mod"
+        ability_mod = modifiers.get(ability_mod_key, 0)
+        spell_dc = 8 + prof_bonus + ability_mod
+        spell_attack_bonus = prof_bonus + ability_mod
+
+    data["stats"] = scores
+    data["modifiers"] = modifiers
+    data["proficiency_bonus"] = prof_bonus
+    data["armor_class"] = base_ac
+    data["speed"] = speed
+    data["size"] = size
+    data["hit_die"] = hit_die
+    if class_name:
+        data["class_name"] = class_name
+    if race_name:
+        data["race_name"] = race_name
+    data["spellcasting_ability"] = spellcasting_ability
+    if spell_dc is not None:
+        data["spell_dc"] = spell_dc
+        data["spell_attack_bonus"] = spell_attack_bonus
+    if "weapons" not in data:
+        data["weapons"] = []
+    if "spells" not in data:
+        data["spells"] = []
+    if "skill_proficiencies" not in data:
+        data["skill_proficiencies"] = []
+
+    return computed_dex_mod, computed_hp_max, data
+
+
+def _format_character_row(r) -> dict:
+    try:
+        data = json.loads(r["data"]) if r["data"] else {}
+    except Exception:
+        data = {}
+    return {
+        "id": r["id"],
+        "campaign_id": r["campaign_id"],
+        "user_id": r["user_id"],
+        "name": r["name"],
+        "level": r["level"],
+        "class_slug": r["class_slug"],
+        "race_slug": r["race_slug"],
+        "dex_mod": r["dex_mod"],
+        "hp_max": r["hp_max"],
+        "data": data,
+        "created_at": r["created_at"],
+        "updated_at": r["updated_at"],
+    }
+
+
+@app.get("/api/characters")
+async def characters_list(
+    campaign_id: Optional[int] = None,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        if user["is_guest"]:
+            return {"items": []}
+        if campaign_id is not None:
+            rows = db.execute(
+                "SELECT * FROM characters WHERE user_id=? AND campaign_id=? ORDER BY id DESC",
+                (user["id"], campaign_id),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM characters WHERE user_id=? ORDER BY id DESC",
+                (user["id"],),
+            ).fetchall()
+
+        return {"items": [_format_character_row(r) for r in rows]}
+
+
+@app.post("/api/characters")
+async def characters_create(
+    payload: CharacterIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        if user["is_guest"]:
+            raise ApiError(403, "Los invitados no pueden crear fichas. Por favor crea una cuenta.", "GUEST_FORBIDDEN")
+
+        name = (payload.name or "").strip()
+        if not (1 <= len(name) <= 60):
+            raise ApiError(400, "Nombre inválido (1-60 caracteres)", "INVALID_NAME")
+
+        level = max(1, min(20, payload.level or 1))
+
+        if payload.campaign_id is not None:
+            camp = db.execute("SELECT 1 FROM campaigns WHERE id=?", (payload.campaign_id,)).fetchone()
+            if camp is None:
+                raise ApiError(404, "Campaña no encontrada", "NOT_FOUND")
+
+        dex_mod, hp_max, data = calculate_character_data(
+            level=level,
+            class_slug=payload.class_slug,
+            race_slug=payload.race_slug,
+            dex_mod=payload.dex_mod,
+            hp_max=payload.hp_max,
+            data=payload.data,
+        )
+
+        ts = now()
+        cur = db.execute(
+            "INSERT INTO characters (campaign_id, user_id, name, level, class_slug, race_slug, dex_mod, hp_max, data, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                payload.campaign_id,
+                user["id"],
+                name,
+                level,
+                payload.class_slug,
+                payload.race_slug,
+                dex_mod,
+                hp_max,
+                json.dumps(data, ensure_ascii=False),
+                ts,
+                ts,
+            ),
+        )
+        cid = cur.lastrowid
+        row = db.execute("SELECT * FROM characters WHERE id=?", (cid,)).fetchone()
+        return _format_character_row(row)
+
+
+@app.get("/api/characters/{char_id}")
+async def characters_get(
+    char_id: int,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        row = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
+        if row is None:
+            raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
+
+        # Dueño o DM de la campaña
+        if row["user_id"] != user["id"]:
+            allowed = False
+            if row["campaign_id"]:
+                camp = db.execute("SELECT dm_user_id FROM campaigns WHERE id=?", (row["campaign_id"],)).fetchone()
+                if camp and camp["dm_user_id"] == user["id"]:
+                    allowed = True
+            if not allowed:
+                raise ApiError(403, "No tienes permiso para ver este personaje", "FORBIDDEN")
+
+        return _format_character_row(row)
+
+
+@app.put("/api/characters/{char_id}")
+async def characters_update(
+    char_id: int,
+    payload: CharacterIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        row = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
+        if row is None:
+            raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
+        if row["user_id"] != user["id"]:
+            raise ApiError(403, "Solo el dueño puede editar el personaje", "FORBIDDEN")
+
+        name = (payload.name or "").strip()
+        if not (1 <= len(name) <= 60):
+            raise ApiError(400, "Nombre inválido (1-60 caracteres)", "INVALID_NAME")
+
+        level = max(1, min(20, payload.level or 1))
+
+        campaign_id = payload.campaign_id if payload.campaign_id is not None else row["campaign_id"]
+        if campaign_id is not None:
+            camp = db.execute("SELECT 1 FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
+            if camp is None:
+                raise ApiError(404, "Campaña no encontrada", "NOT_FOUND")
+
+        dex_mod, hp_max, data = calculate_character_data(
+            level=level,
+            class_slug=payload.class_slug,
+            race_slug=payload.race_slug,
+            dex_mod=payload.dex_mod,
+            hp_max=payload.hp_max,
+            data=payload.data,
+        )
+
+        ts = now()
+        db.execute(
+            "UPDATE characters SET campaign_id=?, name=?, level=?, class_slug=?, race_slug=?, dex_mod=?, hp_max=?, data=?, updated_at=? "
+            "WHERE id=?",
+            (
+                campaign_id,
+                name,
+                level,
+                payload.class_slug,
+                payload.race_slug,
+                dex_mod,
+                hp_max,
+                json.dumps(data, ensure_ascii=False),
+                ts,
+                char_id,
+            ),
+        )
+        updated = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
+        return _format_character_row(updated)
+
+
+@app.delete("/api/characters/{char_id}")
+async def characters_delete(
+    char_id: int,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        row = db.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()
+        if row is None:
+            raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
+        if row["user_id"] != user["id"]:
+            raise ApiError(403, "Solo el dueño puede eliminar el personaje", "FORBIDDEN")
+
+        db.execute("DELETE FROM characters WHERE id=?", (char_id,))
+        return {"ok": True}
+
+
+@app.post("/api/me/link-character")
+async def link_my_character(
+    payload: LinkCharacterIn,
+    x_player_token: Optional[str] = Header(None),
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        player = db.execute("SELECT * FROM players WHERE token=?", (x_player_token,)).fetchone()
+        if player is None:
+            raise HTTPException(status_code=403, detail="Player token inválido")
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (player["session_id"],)).fetchone()
+        if session is None or session["status"] != "active":
+            raise HTTPException(status_code=400, detail="Sesión inactiva")
+
+        user = None
+        if x_user_token:
+            user = require_user(db, x_user_token)
+        else:
+            us = db.execute(
+                "SELECT u.* FROM user_sessions s JOIN users u ON u.id = s.user_id "
+                "WHERE s.token = ? AND s.revoked_at IS NULL AND s.expires_at > ?",
+                (x_player_token, now()),
+            ).fetchone()
+            if us:
+                user = us
+
+        if not user or user["is_guest"]:
+            raise ApiError(403, "Se requiere cuenta de usuario registrada para vincular ficha", "GUEST_FORBIDDEN")
+
+        char = db.execute("SELECT * FROM characters WHERE id=?", (payload.character_id,)).fetchone()
+        if not char:
+            raise ApiError(404, "Personaje no encontrado", "NOT_FOUND")
+        if char["user_id"] != user["id"]:
+            raise ApiError(403, "No eres el dueño de este personaje", "FORBIDDEN")
+
+        comb = db.execute("SELECT * FROM combatants WHERE session_id=? AND player_id=?", (session["id"], player["id"])).fetchone()
+        if comb:
+            db.execute(
+                "UPDATE combatants SET character_id=?, name=?, hp_max=?, hp_current=? WHERE id=?",
+                (char["id"], char["name"], char["hp_max"], char["hp_max"], comb["id"]),
+            )
+            log_event(db, session["id"], "character", f"{player['name']} vinculó la ficha de {char['name']}")
+        else:
+            db.execute(
+                "UPDATE combatants SET character_id=? WHERE session_id=? AND lower(name)=lower(?)",
+                (char["id"], session["id"], char["name"]),
+            )
+        sid = session["id"]
+
+    await broadcast_state(sid)
+    return {"ok": True, "character": _format_character_row(char)}
 
 
 # ================================================================

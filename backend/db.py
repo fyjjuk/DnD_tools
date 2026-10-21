@@ -125,7 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_session_participants_user ON session_participants
 
 CREATE TABLE IF NOT EXISTS characters (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    campaign_id  INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    campaign_id  INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
     level        INTEGER,

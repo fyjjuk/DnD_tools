@@ -4,7 +4,7 @@ const API = {
       let detail = "Error " + res.status;
       try {
         const body = await res.json();
-        if (body && body.detail) detail = body.detail;
+        if (body && (body.error || body.detail)) detail = body.error || body.detail;
       } catch (e) { /* sin body */ }
       throw new Error(detail);
     }
@@ -13,6 +13,13 @@ const API = {
   post(path, body = {}, headers = {}) {
     return fetch(path, {
       method: "POST",
+      headers: Object.assign({ "Content-Type": "application/json" }, headers),
+      body: JSON.stringify(body),
+    }).then((r) => API._handle(r));
+  },
+  put(path, body = {}, headers = {}) {
+    return fetch(path, {
+      method: "PUT",
       headers: Object.assign({ "Content-Type": "application/json" }, headers),
       body: JSON.stringify(body),
     }).then((r) => API._handle(r));
