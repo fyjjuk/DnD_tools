@@ -133,15 +133,14 @@ def create_session_in_campaign(db, campaign_id: int, dm_user_id: int):
         raise ApiError(404, "campaign not found", "NOT_FOUND")
     if campaign["status"] == "archived":
         raise ApiError(400, "campaign archived", "INVALID_INPUT")
-    active = db.execute(
-        "SELECT 1 FROM sessions WHERE status='active' LIMIT 1"
-    ).fetchone()
-    if active:
-        raise ApiError(409, "ya hay una sesion activa", "CAMPAIGN_HAS_ACTIVE_SESSION")
+    now = _now()
+    db.execute(
+        "UPDATE sessions SET status='closed', closed_at=? WHERE status='active'",
+        (now,),
+    )
 
     code = generate_session_code(db)
     dm_token = secrets.token_urlsafe(18)
-    now = _now()
     cur = db.execute(
         "INSERT INTO sessions "
         "(code, status, round, turn_combatant_id, dm_token, created_at, "

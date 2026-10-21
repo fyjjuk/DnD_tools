@@ -492,11 +492,12 @@ async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header
     name = (payload.name or "").strip()
     hp_max = payload.hp_max
 
+    srd = None
     if payload.srd_index:
         with get_srd_db() as db:
             try:
                 srd = db.execute(
-                    "SELECT name, hit_points FROM monsters WHERE index_slug = ?",
+                    "SELECT name, hit_points, dexterity FROM monsters WHERE index_slug = ?",
                     (payload.srd_index,),
                 ).fetchone()
             except sqlite3.OperationalError:
@@ -1305,8 +1306,11 @@ async def websocket_endpoint(websocket: WebSocket, role: str = "player", token: 
 
     with get_db() as db:
         if role == "dm":
-            session = fetch_active_session(db)
-            if session is None or session["dm_token"] != token:
+            session = db.execute(
+                "SELECT * FROM sessions WHERE dm_token = ? AND status = 'active'",
+                (token,),
+            ).fetchone()
+            if session is None:
                 # FIX I3: accept() antes de close() para que el cliente
                 # reciba un close frame WS con code=4003. Si se cierra
                 # antes de accept(), Starlette/Uvicorn lo convierte en
