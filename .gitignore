@@ -30,3 +30,5 @@ repomix-output.*
 Thumbs.db
 .vscode/
 .idea/
+.agent/
+PRD.md
