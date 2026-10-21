@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jugador · Combate D&D 5e</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/app.css?v=2.3">
 </head>
 <body>
 
@@ -12,8 +12,7 @@
   <h1>Unirse al combate</h1>
   <p class="hp-text">Pide el código de sesión a tu DM.</p>
   <form id="join-form">
-    <input id="j-code" placeholder="Código (ej. K7M2QP)" maxlength="6" required
-           style="text-transform:uppercase;letter-spacing:.2em;text-align:center;font-weight:700">
+    <input id="j-code" placeholder="Código (ej. K7M2QP)" maxlength="6" required>
     <input id="j-name" placeholder="Tu nombre / nombre del PJ" maxlength="40" required>
     <button type="submit" class="primary">Entrar</button>
   </form>
@@ -26,15 +25,15 @@
       <div class="label">Sesión</div>
       <div id="p-code" class="code">------</div>
     </div>
-    <div style="text-align:right">
+    <div class="text-right">
       <div class="label">Ronda</div>
       <div id="p-round" class="round">1</div>
     </div>
   </header>
 
-  <nav class="nav-tabs" style="display:flex;background:var(--panel-2);border-bottom:1px solid var(--border);">
-    <button id="tab-combat" class="tab-btn active" type="button" style="flex:1;border-radius:0;border:none;border-bottom:3px solid var(--accent);background:transparent;padding:12px;font-weight:700;">⚔️ Combate</button>
-    <button id="tab-sheet" class="tab-btn" type="button" style="flex:1;border-radius:0;border:none;border-bottom:3px solid transparent;background:transparent;padding:12px;font-weight:700;color:var(--muted);">📜 Mi Ficha</button>
+  <nav class="nav-tabs">
+    <button id="tab-combat" class="tab-btn active" type="button">⚔️ Combate</button>
+    <button id="tab-sheet" class="tab-btn" type="button">📜 Mi Ficha</button>
   </nav>
 
   <main id="pane-combat">
@@ -54,7 +53,7 @@
 
 <div id="player-redirect" class="hidden">Redirigiendo…</div>
 
-<script src="/static/common.js"></script>
-<script src="/static/player.js"></script>
+<script src="/static/common.js?v=2.3"></script>
+<script src="/static/player.js?v=2.3"></script>
 </body>
 </html>

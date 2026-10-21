@@ -29,6 +29,15 @@ body { padding-bottom: 60px; }
   position: sticky; top: 0; z-index: 10;
 }
 
+.text-right { text-align: right; }
+
+#j-code {
+  text-transform: uppercase;
+  letter-spacing: .2em;
+  text-align: center;
+  font-weight: 700;
+}
+
 .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .code { font-size: 26px; font-weight: 800; letter-spacing: .18em; color: var(--accent); font-family: ui-monospace, monospace; }
 .round { font-size: 26px; font-weight: 800; }
@@ -157,3 +166,523 @@ input, select {
   word-break: break-all;
   margin: 0;
 }
+
+/* ================================================================
+   Pestañas de Navegación (Tabs)
+   ================================================================ */
+.nav-tabs {
+  display: flex;
+  background: var(--panel);
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 57px;
+  z-index: 9;
+}
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  border-bottom: 3px solid transparent;
+  padding: 14px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tab-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom-color: transparent;
+}
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(224, 180, 92, 0.06);
+}
+
+/* ================================================================
+   Ficha de Personaje D&D (Fase 2.3 Rediseño)
+   ================================================================ */
+.sheet-container {
+  max-width: 780px;
+  margin: 18px auto;
+  padding: 0 14px;
+}
+
+.sheet-loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sheet-range-val {
+  font-size: 15px;
+  font-weight: 800;
+  color: #bca4f5;
+  font-family: ui-monospace, monospace;
+}
+
+.c-name-large {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.sheet-selector-row {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.sheet-selector-row .label {
+  white-space: nowrap;
+}
+
+/* Cabecera Hero */
+.sheet-header-card {
+  background: linear-gradient(135deg, var(--panel) 0%, #1e2433 100%);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 22px;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+.sheet-header-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.sheet-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.sheet-char-name {
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px 0;
+  line-height: 1.15;
+}
+.sheet-char-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sheet-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 99px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.sheet-badge.level {
+  background: rgba(224, 180, 92, 0.18);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.sheet-badge.class-race {
+  background: var(--panel-2);
+  color: #b8c4d9;
+  border: 1px solid var(--border);
+}
+
+.sheet-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-link-hero {
+  background: linear-gradient(180deg, #5ec98f 0%, #3a9763 100%);
+  color: #0b1f13 !important;
+  border: 1px solid #78dfa6 !important;
+  font-weight: 800;
+  box-shadow: 0 2px 10px rgba(76, 175, 125, 0.35);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.btn-link-hero:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* Vitals Grid */
+.sheet-vitals-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+}
+@media (max-width: 500px) {
+  .sheet-vitals-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.vital-stat-box {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.vital-stat-box .vital-val {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+  margin-top: 3px;
+}
+.vital-stat-box.hp .vital-val { color: var(--green); }
+.vital-stat-box.ac .vital-val { color: var(--accent); }
+.vital-stat-box.speed .vital-val { color: #fff; }
+.vital-stat-box.prof .vital-val { color: #8fd0ff; }
+
+/* Sections */
+.sheet-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.sheet-section-title {
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 6 Ability Scores Cards */
+.sheet-abilities-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (min-width: 680px) {
+  .sheet-abilities-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+.ability-score-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 6px 10px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.ability-score-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.ability-name {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.ability-mod {
+  font-size: 28px;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1.1;
+  margin: 4px 0 6px;
+  font-family: ui-monospace, monospace;
+}
+.ability-score-pill {
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: #b8c4d9;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+/* Magic Overview Banner */
+.sheet-magic-banner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.magic-stat-box {
+  background: var(--panel-2);
+  border: 1px solid rgba(224, 180, 92, 0.35);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.magic-stat-val {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+/* Item & Spell Cards */
+.sheet-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sheet-item-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.sheet-item-card:hover {
+  background: #282e40;
+}
+.sheet-item-card.spell-card {
+  border-left-color: #8c7ae6;
+}
+.sheet-item-main {
+  flex: 1;
+}
+.sheet-item-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.sheet-item-desc {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sheet-item-pill {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.sheet-item-stat {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.sheet-stat-big {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+}
+.sheet-stat-sub {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.sheet-empty-hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+  font-style: italic;
+}
+
+/* ================================================================
+   Formulario de Creación / Edición
+   ================================================================ */
+.sheet-form-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 760px;
+  margin: 18px auto;
+}
+.sheet-form-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 18px 0;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.form-field-group {
+  margin-bottom: 18px;
+}
+.form-field-group > label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.form-row-identity {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.5fr 1.5fr;
+  gap: 10px;
+}
+@media (max-width: 640px) {
+  .form-row-identity {
+    grid-template-columns: 1fr 1fr;
+  }
+  .form-row-identity > div:first-child {
+    grid-column: 1 / -1;
+  }
+}
+.form-scores-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+@media (max-width: 480px) {
+  .form-scores-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.score-input-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.score-input-card span {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.score-input-card input {
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+  padding: 6px 8px;
+  font-family: ui-monospace, monospace;
+}
+.form-actions-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.form-actions-row button {
+  flex: 1;
+  padding: 12px;
+  font-size: 15px;
+}
+
+/* ================================================================
+   Modo Invitado (Guest Alert Card)
+   ================================================================ */
+.guest-sheet-card {
+  max-width: 540px;
+  margin: 32px auto;
+  background: linear-gradient(135deg, var(--panel) 0%, #1c2230 100%);
+  border: 1px solid rgba(224, 180, 92, 0.4);
+  border-radius: 16px;
+  padding: 32px 24px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+.guest-icon-badge {
+  font-size: 48px;
+  margin-bottom: 12px;
+  display: inline-block;
+  filter: drop-shadow(0 4px 10px rgba(224, 180, 92, 0.3));
+}
+.guest-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+  margin: 0 0 10px 0;
+}
+.guest-desc {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  margin: 0 0 12px 0;
+}
+.guest-subtext {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 24px 0;
+}
+.guest-btn-group {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.guest-btn-group a {
+  padding: 12px 24px;
+  border-radius: 9px;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.guest-btn-group a:hover {
+  transform: translateY(-1px);
+}
+.guest-btn-primary {
+  background: var(--accent);
+  color: #191d27;
+}
+.guest-btn-secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+

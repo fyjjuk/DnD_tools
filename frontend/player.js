@@ -52,29 +52,16 @@ function initTabs() {
 
   tabCombat.addEventListener("click", () => {
     tabCombat.classList.add("active");
-    tabCombat.style.borderBottomColor = "var(--accent)";
-    tabCombat.style.color = "var(--text)";
-
     tabSheet.classList.remove("active");
-    tabSheet.style.borderBottomColor = "transparent";
-    tabSheet.style.color = "var(--muted)";
-
     paneCombat.classList.remove("hidden");
     paneSheet.classList.add("hidden");
   });
 
   tabSheet.addEventListener("click", () => {
     tabSheet.classList.add("active");
-    tabSheet.style.borderBottomColor = "var(--accent)";
-    tabSheet.style.color = "var(--text)";
-
     tabCombat.classList.remove("active");
-    tabCombat.style.borderBottomColor = "transparent";
-    tabCombat.style.color = "var(--muted)";
-
     paneCombat.classList.add("hidden");
     paneSheet.classList.remove("hidden");
-
     loadAndRenderSheet();
   });
 }
@@ -154,7 +141,7 @@ function renderMe() {
 
   box.innerHTML = `
     <h2>Tu personaje</h2>
-    <div class="c-name" style="font-size:20px">${escapeHtml(me.name)}</div>
+    <div class="c-name c-name-large">${escapeHtml(me.name)}</div>
     <div class="me-hp">${me.hp_current} / ${me.hp_max} HP</div>
     <div class="hpbar"><div class="hpfill" style="width:${pct}%"></div></div>
     <div class="c-actions">
@@ -259,25 +246,25 @@ async function loadAndRenderSheet() {
 
   if (isGuest) {
     container.innerHTML = `
-      <div class="panel" style="text-align:center;padding:28px 16px;">
-        <div style="font-size:42px;margin-bottom:12px;">🛡️</div>
-        <h2 style="font-size:19px;color:var(--accent);margin-bottom:8px;text-transform:none;">Estás jugando como Invitado</h2>
-        <p style="color:var(--text);margin-bottom:12px;font-size:15px;line-height:1.5;">
-          Como invitado puedes seguir participando en este combate y modificando tus puntos de vida normalmente en la pestaña <strong>Combate</strong>.
+      <div class="guest-sheet-card">
+        <div class="guest-icon-badge">🛡️</div>
+        <h2 class="guest-title">Estás jugando como Invitado</h2>
+        <p class="guest-desc">
+          Como invitado puedes participar activamente en el combate y modificar tus puntos de vida en la pestaña <strong>Combate</strong>.
         </p>
-        <p style="color:var(--muted);font-size:13px;margin-bottom:22px;max-width:380px;margin-left:auto;margin-right:auto;">
-          Para guardar una <strong>Ficha de Personaje permanente</strong> con tus estadísticas, armas y conjuros, necesitas una cuenta de aventurero.
+        <p class="guest-subtext">
+          Para crear y guardar tu <strong>Ficha de Personaje permanente</strong> con todas tus estadísticas, armas y conjuros, crea una cuenta de aventurero.
         </p>
-        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-          <a href="/register" style="padding:10px 20px;border-radius:9px;background:var(--accent);color:#191d27;text-decoration:none;font-weight:700;">Crear cuenta gratis</a>
-          <a href="/login" style="padding:10px 20px;border-radius:9px;background:var(--panel-2);color:var(--text);border:1px solid var(--border);text-decoration:none;font-weight:600;">Iniciar sesión</a>
+        <div class="guest-btn-group">
+          <a href="/register" class="guest-btn-primary">Crear cuenta gratis</a>
+          <a href="/login" class="guest-btn-secondary">Iniciar sesión</a>
         </div>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--muted);">Cargando tu ficha…</div>';
+  container.innerHTML = '<div class="sheet-loading">Cargando tu ficha de personaje…</div>';
 
   try {
     const res = await API.get("/api/characters", { "X-User-Token": userToken });
@@ -327,60 +314,62 @@ function renderCharacterSheet(container, char) {
   let selectorHtml = "";
   if (userCharacters.length > 1) {
     selectorHtml = `
-      <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
-        <label class="label" style="min-width:60px;">Cambiar PJ:</label>
-        <select id="sel-char" style="padding:6px 10px;font-size:13px;">
-          ${userCharacters.map((c) => `<option value="${c.id}" ${c.id === char.id ? "selected" : ""}>${escapeHtml(c.name)} (Nivel ${c.level})</option>`).join("")}
+      <div class="sheet-selector-row">
+        <span class="label">Cambiar Personaje:</span>
+        <select id="sel-char">
+          ${userCharacters.map((c) => `<option value="${c.id}" ${c.id === char.id ? "selected" : ""}>${escapeHtml(c.name)} · Nivel ${c.level} ${escapeHtml(c.class_slug || "")}</option>`).join("")}
         </select>
       </div>
     `;
   }
 
   container.innerHTML = `
-    <div style="max-width:640px;margin:0 auto;">
+    <div class="sheet-container">
       ${selectorHtml}
 
-      <!-- Cabecera de Ficha -->
-      <div class="panel" style="margin:0 0 14px;border-color:var(--accent);">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+      <!-- Cabecera Hero -->
+      <div class="sheet-header-card">
+        <div class="sheet-title-row">
           <div>
-            <h1 style="font-size:24px;margin:0 0 4px;color:var(--accent);">${escapeHtml(char.name)}</h1>
-            <div style="color:var(--muted);font-size:14px;">
-              Nivel ${char.level} · ${escapeHtml(d.race_name || char.race_slug || "Raza")} · ${escapeHtml(d.class_name || char.class_slug || "Clase")}
+            <h1 class="sheet-char-name">${escapeHtml(char.name)}</h1>
+            <div class="sheet-char-badges">
+              <span class="sheet-badge level">Nivel ${char.level}</span>
+              <span class="sheet-badge class-race">${escapeHtml(d.race_name || char.race_slug || "Raza")}</span>
+              <span class="sheet-badge class-race">${escapeHtml(d.class_name || char.class_slug || "Clase")}</span>
             </div>
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button id="btn-link-char" class="primary small">⚔️ Vincular a Combate</button>
-            <button id="btn-edit-char" class="small">✏️ Editar</button>
+          <div class="sheet-header-actions">
+            <button id="btn-link-char" class="btn-link-hero small">⚔️ Vincular a Combate</button>
+            <button id="btn-edit-char" class="small">✏️ Editar Ficha</button>
             <button id="btn-new-char" class="small">➕ Nuevo PJ</button>
           </div>
         </div>
 
         <!-- Estadísticas vitales -->
-        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-top:14px;text-align:center;">
-          <div style="background:var(--panel-2);padding:8px 4px;border-radius:8px;border:1px solid var(--border);">
-            <div class="label">Puntos de Vida</div>
-            <div style="font-size:20px;font-weight:800;color:var(--green);">${hpMax} HP</div>
+        <div class="sheet-vitals-grid">
+          <div class="vital-stat-box hp">
+            <span class="label">Puntos de Vida</span>
+            <span class="vital-val">${hpMax} HP</span>
           </div>
-          <div style="background:var(--panel-2);padding:8px 4px;border-radius:8px;border:1px solid var(--border);">
-            <div class="label">Clase Armadura</div>
-            <div style="font-size:20px;font-weight:800;color:var(--accent);">${ac} CA</div>
+          <div class="vital-stat-box ac">
+            <span class="label">Armadura (CA)</span>
+            <span class="vital-val">${ac} CA</span>
           </div>
-          <div style="background:var(--panel-2);padding:8px 4px;border-radius:8px;border:1px solid var(--border);">
-            <div class="label">Velocidad</div>
-            <div style="font-size:20px;font-weight:800;">${speed} ft</div>
+          <div class="vital-stat-box speed">
+            <span class="label">Velocidad</span>
+            <span class="vital-val">${speed} ft</span>
           </div>
-          <div style="background:var(--panel-2);padding:8px 4px;border-radius:8px;border:1px solid var(--border);">
-            <div class="label">Competencia</div>
-            <div style="font-size:20px;font-weight:800;color:var(--accent);">+${prof}</div>
+          <div class="vital-stat-box prof">
+            <span class="label">Competencia</span>
+            <span class="vital-val">+${prof}</span>
           </div>
         </div>
       </div>
 
-      <!-- Rejilla de 6 Características -->
-      <div class="panel" style="margin:0 0 14px;">
-        <h2>Características</h2>
-        <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;">
+      <!-- Rejilla de 6 Características D&D -->
+      <div class="sheet-section">
+        <h2 class="sheet-section-title">📊 Características Base</h2>
+        <div class="sheet-abilities-grid">
           ${[
             { key: "FUE", name: "Fuerza", score: stats.strength, mod: mods.str_mod },
             { key: "DES", name: "Destreza", score: stats.dexterity, mod: mods.dex_mod },
@@ -389,36 +378,39 @@ function renderCharacterSheet(container, char) {
             { key: "SAB", name: "Sabiduría", score: stats.wisdom, mod: mods.wis_mod },
             { key: "CAR", name: "Carisma", score: stats.charisma, mod: mods.cha_mod },
           ].map((s) => `
-            <div style="background:var(--panel-2);padding:10px;border-radius:8px;border:1px solid var(--border);text-align:center;">
-              <div class="label">${s.key}</div>
-              <div style="font-size:22px;font-weight:800;margin:2px 0;">${fmtMod(s.mod)}</div>
-              <div style="font-size:12px;color:var(--muted);">${s.score} (${s.name})</div>
+            <div class="ability-score-card">
+              <span class="ability-name">${s.key}</span>
+              <span class="ability-mod">${fmtMod(s.mod)}</span>
+              <span class="ability-score-pill">${s.score}</span>
             </div>
           `).join("")}
         </div>
       </div>
 
       <!-- Armas y Ataques -->
-      <div class="panel" style="margin:0 0 14px;">
-        <h2>Armas y Ataques</h2>
+      <div class="sheet-section">
+        <h2 class="sheet-section-title">🗡️ Armas y Ataques</h2>
         ${weapons.length === 0 ? `
-          <p style="color:var(--muted);font-size:13px;margin:0;">No tienes armas equipadas todavía.</p>
+          <p class="sheet-empty-hint">No tienes armas equipadas en esta ficha.</p>
         ` : `
-          <div style="display:flex;flex-direction:column;gap:8px;">
+          <div class="sheet-items-list">
             ${weapons.map((w) => {
               const strMod = mods.str_mod;
               const dexMod = mods.dex_mod;
               const modToUse = (w.properties && w.properties.includes("finesse") && dexMod > strMod) ? dexMod : strMod;
               const atkBonus = w.attack_bonus !== undefined ? w.attack_bonus : (modToUse + prof);
               return `
-                <div style="background:var(--panel-2);padding:10px 12px;border-radius:8px;border:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                  <div>
-                    <div style="font-weight:700;font-size:15px;">🗡️ ${escapeHtml(w.name)}</div>
-                    <div style="color:var(--muted);font-size:12px;">Daño: ${escapeHtml(w.damage || w.damage_dice || "1d8")} ${escapeHtml(w.damage_type || "")}</div>
+                <div class="sheet-item-card">
+                  <div class="sheet-item-main">
+                    <div class="sheet-item-name">🗡️ ${escapeHtml(w.name)}</div>
+                    <div class="sheet-item-desc">
+                      <span class="sheet-item-pill">Daño: ${escapeHtml(w.damage || w.damage_dice || "1d8")}</span>
+                      ${w.damage_type ? `<span class="sheet-item-pill">${escapeHtml(w.damage_type)}</span>` : ""}
+                    </div>
                   </div>
-                  <div style="text-align:right;">
-                    <span style="font-weight:800;color:var(--accent);font-size:15px;">${fmtMod(atkBonus)}</span>
-                    <span class="label" style="display:block;font-size:10px;">Ataque</span>
+                  <div class="sheet-item-stat">
+                    <span class="sheet-stat-big">${fmtMod(atkBonus)}</span>
+                    <span class="sheet-stat-sub">Bono Ataque</span>
                   </div>
                 </div>
               `;
@@ -427,32 +419,40 @@ function renderCharacterSheet(container, char) {
         `}
       </div>
 
-      <!-- Hechizos y Conjuros -->
-      <div class="panel" style="margin:0 0 14px;">
-        <h2>Conjuros y Magia</h2>
+      <!-- Conjuros y Magia -->
+      <div class="sheet-section">
+        <h2 class="sheet-section-title">✨ Conjuros y Magia</h2>
         ${d.spell_dc ? `
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-            <div style="background:var(--panel-2);padding:8px;border-radius:8px;text-align:center;border:1px solid var(--border);">
-              <div class="label">CD Salvación Conjuros</div>
-              <div style="font-size:18px;font-weight:800;color:var(--accent);">${d.spell_dc}</div>
+          <div class="sheet-magic-banner">
+            <div class="magic-stat-box">
+              <span class="label">CD Salvación de Conjuros</span>
+              <div class="magic-stat-val">${d.spell_dc}</div>
             </div>
-            <div style="background:var(--panel-2);padding:8px;border-radius:8px;text-align:center;border:1px solid var(--border);">
-              <div class="label">Bonus Ataque Mágico</div>
-              <div style="font-size:18px;font-weight:800;color:var(--accent);">${fmtMod(d.spell_attack_bonus || 0)}</div>
+            <div class="magic-stat-box">
+              <span class="label">Bono de Ataque Mágico</span>
+              <div class="magic-stat-val">${fmtMod(d.spell_attack_bonus || 0)}</div>
             </div>
           </div>
         ` : ""}
         ${spells.length === 0 ? `
-          <p style="color:var(--muted);font-size:13px;margin:0;">No tienes conjuros registrados en esta ficha.</p>
+          <p class="sheet-empty-hint">No tienes conjuros registrados en esta ficha.</p>
         ` : `
-          <div style="display:flex;flex-direction:column;gap:8px;">
+          <div class="sheet-items-list">
             ${spells.map((s) => `
-              <div style="background:var(--panel-2);padding:10px 12px;border-radius:8px;border:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                  <div style="font-weight:700;font-size:15px;">✨ ${escapeHtml(s.name)}</div>
-                  <div style="color:var(--muted);font-size:12px;">Nivel ${s.level !== undefined ? (s.level === 0 ? "Truco" : s.level) : "—"} · ${escapeHtml(s.school || "")}</div>
+              <div class="sheet-item-card spell-card">
+                <div class="sheet-item-main">
+                  <div class="sheet-item-name">✨ ${escapeHtml(s.name)}</div>
+                  <div class="sheet-item-desc">
+                    <span class="sheet-item-pill">${s.level !== undefined ? (s.level === 0 ? "Truco" : "Nivel " + s.level) : "—"}</span>
+                    ${s.school ? `<span class="sheet-item-pill">${escapeHtml(s.school)}</span>` : ""}
+                  </div>
                 </div>
-                ${s.range ? `<div style="font-size:12px;color:var(--accent);">${escapeHtml(s.range)}</div>` : ""}
+                ${s.range ? `
+                  <div class="sheet-item-stat">
+                    <span class="sheet-stat-big sheet-range-val">${escapeHtml(s.range)}</span>
+                    <span class="sheet-stat-sub">Alcance</span>
+                  </div>
+                ` : ""}
               </div>
             `).join("")}
           </div>
@@ -505,7 +505,7 @@ function renderCharacterSheet(container, char) {
 }
 
 async function renderCharacterForm(container, charToEdit) {
-  container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--muted);">Cargando catálogo SRD…</div>';
+  container.innerHTML = '<div class="sheet-loading">Cargando catálogo SRD…</div>';
   await ensureSrdData();
 
   const isEdit = !!charToEdit;
@@ -519,79 +519,79 @@ async function renderCharacterForm(container, charToEdit) {
 
   const initialClass = (charToEdit && charToEdit.class_slug) || (classes[0] && classes[0].index) || "fighter";
   const initialRace = (charToEdit && charToEdit.race_slug) || (races[0] && races[0].index) || "human";
-
-  // Existing first weapon / spell
   const initialWeapon = (d.weapons && d.weapons[0] && d.weapons[0].equipment_slug) || (weapons[0] && weapons[0].index) || "";
   const initialSpell = (d.spells && d.spells[0] && d.spells[0].spell_slug) || "";
 
   container.innerHTML = `
-    <div style="max-width:600px;margin:0 auto;" class="panel">
-      <h2>${isEdit ? "Editar Ficha de Personaje" : "Crear Nueva Ficha de Personaje"}</h2>
-      <form id="char-form" style="display:flex;flex-direction:column;gap:12px;margin-top:14px;">
-        <div>
-          <label class="label">Nombre del Personaje</label>
-          <input id="f-name" value="${escapeHtml((charToEdit && charToEdit.name) || "")}" placeholder="Ej. Valeros, Mialee..." required maxlength="60">
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-          <div>
-            <label class="label">Nivel (1-20)</label>
-            <input id="f-level" type="number" min="1" max="20" value="${(charToEdit && charToEdit.level) || 1}" required>
-          </div>
-          <div>
-            <label class="label">Clase</label>
-            <select id="f-class">
-              ${classes.map((c) => `<option value="${c.index}" ${c.index === initialClass ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
-            </select>
-          </div>
-          <div>
-            <label class="label">Raza</label>
-            <select id="f-race">
-              ${races.map((r) => `<option value="${r.index}" ${r.index === initialRace ? "selected" : ""}>${escapeHtml(r.name)}</option>`).join("")}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label class="label">Puntuaciones de Característica</label>
-          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-top:4px;">
+    <div class="sheet-form-card">
+      <h2 class="sheet-form-title">${isEdit ? "✏️ Editar Ficha de Personaje" : "✨ Crear Nueva Ficha de Personaje"}</h2>
+      <form id="char-form">
+        <!-- Fila 1: Identidad básica -->
+        <div class="form-field-group">
+          <label>Identidad del Personaje</label>
+          <div class="form-row-identity">
             <div>
-              <span class="label">Fuerza</span>
+              <input id="f-name" value="${escapeHtml((charToEdit && charToEdit.name) || "")}" placeholder="Nombre (ej. Valeros, Mialee...)" required maxlength="60">
+            </div>
+            <div>
+              <input id="f-level" type="number" min="1" max="20" value="${(charToEdit && charToEdit.level) || 1}" required placeholder="Nivel">
+            </div>
+            <div>
+              <select id="f-class">
+                ${classes.map((c) => `<option value="${c.index}" ${c.index === initialClass ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
+              </select>
+            </div>
+            <div>
+              <select id="f-race">
+                ${races.map((r) => `<option value="${r.index}" ${r.index === initialRace ? "selected" : ""}>${escapeHtml(r.name)}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fila 2: Puntuaciones de Característica -->
+        <div class="form-field-group">
+          <label>Puntuaciones de Característica (1 - 30)</label>
+          <div class="form-scores-grid">
+            <div class="score-input-card">
+              <span>Fuerza (FUE)</span>
               <input id="f-str" type="number" min="1" max="30" value="${stats.strength}">
             </div>
-            <div>
-              <span class="label">Destreza</span>
+            <div class="score-input-card">
+              <span>Destreza (DES)</span>
               <input id="f-dex" type="number" min="1" max="30" value="${stats.dexterity}">
             </div>
-            <div>
-              <span class="label">Constitución</span>
+            <div class="score-input-card">
+              <span>Constitución (CON)</span>
               <input id="f-con" type="number" min="1" max="30" value="${stats.constitution}">
             </div>
-            <div>
-              <span class="label">Inteligencia</span>
+            <div class="score-input-card">
+              <span>Inteligencia (INT)</span>
               <input id="f-int" type="number" min="1" max="30" value="${stats.intelligence}">
             </div>
-            <div>
-              <span class="label">Sabiduría</span>
+            <div class="score-input-card">
+              <span>Sabiduría (SAB)</span>
               <input id="f-wis" type="number" min="1" max="30" value="${stats.wisdom}">
             </div>
-            <div>
-              <span class="label">Carisma</span>
+            <div class="score-input-card">
+              <span>Carisma (CAR)</span>
               <input id="f-cha" type="number" min="1" max="30" value="${stats.charisma}">
             </div>
           </div>
         </div>
 
-        <div>
-          <label class="label">Arma Principal</label>
+        <!-- Fila 3: Arma Principal -->
+        <div class="form-field-group">
+          <label>Arma Principal</label>
           <select id="f-weapon">
             <option value="">-- Sin arma --</option>
             ${weapons.map((w) => `<option value="${w.index}" ${w.index === initialWeapon ? "selected" : ""}>${escapeHtml(w.name)} (${w.damage ? w.damage.damage_dice : ""})</option>`).join("")}
           </select>
         </div>
 
-        <div>
-          <label class="label">Conjuro Principal (Opcional)</label>
+        <!-- Fila 4: Conjuro Principal -->
+        <div class="form-field-group">
+          <label>Conjuro Principal (Opcional)</label>
           <select id="f-spell">
             <option value="">-- Sin conjuro --</option>
             ${spells.map((s) => `<option value="${s.index}" ${s.index === initialSpell ? "selected" : ""}>${escapeHtml(s.name)} (Nivel ${s.level === 0 ? "Truco" : s.level})</option>`).join("")}
@@ -600,9 +600,9 @@ async function renderCharacterForm(container, charToEdit) {
 
         <p id="f-error" class="error"></p>
 
-        <div style="display:flex;gap:8px;margin-top:6px;">
-          <button type="submit" class="primary" style="flex:1;">${isEdit ? "Guardar Cambios" : "Crear Ficha"}</button>
-          ${isEdit ? '<button id="btn-cancel-edit" type="button" style="flex:1;">Cancelar</button>' : ""}
+        <div class="form-actions-row">
+          <button type="submit" class="primary">${isEdit ? "Guardar Cambios" : "Crear Ficha"}</button>
+          ${isEdit ? '<button id="btn-cancel-edit" type="button">Cancelar</button>' : ""}
         </div>
       </form>
     </div>
