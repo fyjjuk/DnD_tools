@@ -153,9 +153,36 @@ lee `DND_DM_PASSWORD` del entorno en cada request.
 6. Cerrar sesión guarda `data/logs/session_<CODIGO>.log` con todos
    los eventos (daño, curación, muertes, cambios de turno) y termina la sesión.
 
+## Bases de datos
+
+A partir de la Fase 2.1.2-B-1, la persistencia se divide en tres bases de datos SQLite independientes en `data/` para separar el contenido oficial de los datos de usuario y evitar corrupciones en futuras importaciones:
+
+1. **`data/dnd.db`** (Base de datos principal / usuario):
+   - Almacena el estado de sesiones, combatientes, jugadores, eventos, historial de HP, usuarios, sesiones de usuario, campañas, miembros, invitaciones, participantes, personajes y comentarios.
+   - Ya no contiene tablas del SRD.
+
+2. **`data/srd.db`** (Base de datos del SRD 5e):
+   - Almacena el contenido oficial importado: `collections`, `import_meta` y `monsters`.
+   - Permite re-importar el SRD (`scripts/import_srd.py`) de forma completamente aislada sin tocar ni bloquear las tablas de usuario ni las sesiones activas.
+
+3. **`data/homebrew.db`** (Base de datos de contenido personalizado):
+   - Espacio reservado para monstruos y colecciones personalizados creados por el DM o jugadores.
+
+Todas las bases de datos operan en modo WAL (`PRAGMA journal_mode=WAL`).
+
+### Backups de seguridad
+
+- Antes de aplicar migraciones estructurales se realizan copias de seguridad en `data/dnd.db.pre-*.bak` (incluyendo `-wal` y `-shm` si existen).
+- Para restaurar un backup previo en caso de incidente:
+  ```bash
+  cp data/dnd.db.pre-2.1.2-b-1.bak data/dnd.db
+  ```
+- El log histórico de cada sesión cerrada se conserva en `data/logs/session_<CODIGO>.log`.
+
 ## Persistencia
 
-- Estado en `data/dnd.db` (SQLite, modo WAL).
+- Estado de usuario en `data/dnd.db` (SQLite, modo WAL).
+- Estado SRD en `data/srd.db` y contenido homebrew en `data/homebrew.db`.
 - Si cierras el navegador del DM y vuelves a `/dm`, la sesión activa
   se recupera automáticamente con su código y su combate en curso.
 - El log de cada sesión cerrada queda en `data/logs/session_<CODIGO>.log`.
@@ -165,8 +192,10 @@ lee `DND_DM_PASSWORD` del entorno en cada request.
 Todo en un único archivo: `config.py`
 
 ```python
-PORT = 8000                                          # puerto HTTP
-DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")   # ruta SQLite
+PORT = 8000                                               # puerto HTTP
+DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")        # ruta SQLite principal
+SRD_DB_PATH = os.path.join(BASE_DIR, "data", "srd.db")    # ruta SQLite SRD
+HOMEBREW_DB_PATH = os.path.join(BASE_DIR, "data", "homebrew.db") # ruta SQLite Homebrew
 ```
 
 ### Contraseña de DM

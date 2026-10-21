@@ -138,7 +138,7 @@ def main() -> int:
         help="Directorio con 5e-SRD-Monsters.json (default: config.SRD_DIR)",
     )
     parser.add_argument(
-        "--db", default=config.DB_PATH, help="Ruta de la SQLite del MVP"
+        "--db", default=config.SRD_DB_PATH, help="Ruta de la SQLite del SRD"
     )
     args = parser.parse_args()
 

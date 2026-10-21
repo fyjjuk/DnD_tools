@@ -16,7 +16,7 @@ from pydantic import BaseModel
 import segno
 
 import config
-from backend.db import get_db, init_db
+from backend.db import get_db, get_srd_db, init_db
 from backend.ws import ConnectionManager
 from backend.auth import (
     ApiError, create_user_session, ensure_dm_user, ensure_user_session,
@@ -375,7 +375,7 @@ async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header
     hp_max = payload.hp_max
 
     if payload.srd_index:
-        with get_db() as db:
+        with get_srd_db() as db:
             try:
                 srd = db.execute(
                     "SELECT name, hit_points FROM monsters WHERE index_slug = ?",
@@ -700,7 +700,7 @@ async def srd_monsters(
     params.append(limit)
 
     try:
-        with get_db() as db:
+        with get_srd_db() as db:
             rows = db.execute(sql, params).fetchall()
     except sqlite3.OperationalError:
         return {"items": []}
@@ -729,7 +729,7 @@ async def srd_monsters(
 async def srd_monster(index: str):
     """Ficha completa de un monstruo del bestiario SRD (solo lectura, sin token)."""
     try:
-        with get_db() as db:
+        with get_srd_db() as db:
             row = db.execute(
                 "SELECT * FROM monsters WHERE index_slug = ?", (index,)
             ).fetchone()

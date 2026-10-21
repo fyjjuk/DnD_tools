@@ -9,6 +9,10 @@ PORT = 8000
 # Ruta del archivo SQLite (se crea sola al arrancar)
 DB_PATH = os.path.join(BASE_DIR, "data", "dnd.db")
 
+# Rutas de las bases de datos separadas (Fase 2.1.2-B-1)
+SRD_DB_PATH = os.path.join(BASE_DIR, "data", "srd.db")
+HOMEBREW_DB_PATH = os.path.join(BASE_DIR, "data", "homebrew.db")
+
 
 # Contrasena de DM.
 # DM_PASSWORD: si vacia, /api/dm/bootstrap y /api/auth/login con

@@ -151,6 +151,102 @@ CREATE TABLE IF NOT EXISTS session_comments (
 CREATE INDEX IF NOT EXISTS idx_session_comments_session ON session_comments(session_id);
 """
 
+SCHEMA_SRD = """
+CREATE TABLE IF NOT EXISTS collections (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug          TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT 'srd-2014-es',
+    imported_at   TEXT NOT NULL,
+    record_count  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS import_meta (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_slug TEXT NOT NULL,
+    source_path     TEXT NOT NULL,
+    source_locale   TEXT NOT NULL DEFAULT 'es',
+    file_hash       TEXT,
+    imported_at     TEXT NOT NULL,
+    record_count    INTEGER NOT NULL,
+    errors_json     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_import_meta_coll
+    ON import_meta(collection_slug, imported_at);
+
+CREATE TABLE IF NOT EXISTS monsters (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_slug    TEXT NOT NULL DEFAULT 'monsters',
+    index_slug         TEXT NOT NULL UNIQUE,
+    name               TEXT NOT NULL,
+    size               TEXT,
+    type               TEXT,
+    subtype            TEXT,
+    alignment          TEXT,
+    hit_points         INTEGER NOT NULL,
+    hit_dice           TEXT,
+    hit_points_roll    TEXT,
+    armor_class        INTEGER,
+    armor_class_type   TEXT,
+    challenge_rating   REAL NOT NULL,
+    xp                 INTEGER NOT NULL,
+    strength           INTEGER,
+    dexterity          INTEGER,
+    constitution       INTEGER,
+    intelligence       INTEGER,
+    wisdom             INTEGER,
+    charisma           INTEGER,
+    proficiency_bonus  INTEGER,
+    data               TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_monsters_cr   ON monsters(challenge_rating);
+CREATE INDEX IF NOT EXISTS idx_monsters_type ON monsters(type);
+CREATE INDEX IF NOT EXISTS idx_monsters_size ON monsters(size);
+CREATE INDEX IF NOT EXISTS idx_monsters_name ON monsters(name COLLATE NOCASE);
+"""
+
+SCHEMA_HOMEBREW = """
+CREATE TABLE IF NOT EXISTS collections (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug          TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT 'homebrew',
+    created_at    TEXT NOT NULL,
+    record_count  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS monsters (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_slug    TEXT NOT NULL DEFAULT 'homebrew',
+    index_slug         TEXT NOT NULL UNIQUE,
+    name               TEXT NOT NULL,
+    size               TEXT,
+    type               TEXT,
+    subtype            TEXT,
+    alignment          TEXT,
+    hit_points         INTEGER NOT NULL,
+    hit_dice           TEXT,
+    hit_points_roll    TEXT,
+    armor_class        INTEGER,
+    armor_class_type   TEXT,
+    challenge_rating   REAL NOT NULL DEFAULT 0,
+    xp                 INTEGER NOT NULL DEFAULT 0,
+    strength           INTEGER,
+    dexterity          INTEGER,
+    constitution       INTEGER,
+    intelligence       INTEGER,
+    wisdom             INTEGER,
+    charisma           INTEGER,
+    proficiency_bonus  INTEGER,
+    data               TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_homebrew_monsters_cr   ON monsters(challenge_rating);
+CREATE INDEX IF NOT EXISTS idx_homebrew_monsters_type ON monsters(type);
+CREATE INDEX IF NOT EXISTS idx_homebrew_monsters_name ON monsters(name COLLATE NOCASE);
+"""
+
 
 def _migrate_v2_columns(conn):
     """Anade columnas nuevas a sessions/combatants (idempotente)."""
@@ -186,6 +282,72 @@ def get_db():
         conn.close()
 
 
+def _connect_srd():
+    conn = sqlite3.connect(config.SRD_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+@contextmanager
+def get_srd_db():
+    conn = _connect_srd()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _connect_homebrew():
+    conn = sqlite3.connect(config.HOMEBREW_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+@contextmanager
+def get_homebrew_db():
+    conn = _connect_homebrew()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_srd_db():
+    directory = os.path.dirname(config.SRD_DB_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    conn = sqlite3.connect(config.SRD_DB_PATH)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(SCHEMA_SRD)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_homebrew_db():
+    directory = os.path.dirname(config.HOMEBREW_DB_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    conn = sqlite3.connect(config.HOMEBREW_DB_PATH)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(SCHEMA_HOMEBREW)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def init_db():
     directory = os.path.dirname(config.DB_PATH)
     if directory:
@@ -199,3 +361,5 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
+    init_srd_db()
+    init_homebrew_db()

@@ -34,7 +34,7 @@ def check(name, fn):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", default=config.DB_PATH)
+    parser.add_argument("--db", default=config.SRD_DB_PATH)
     args = parser.parse_args()
 
     if not os.path.exists(args.db):
