@@ -193,12 +193,11 @@ async def run_checks():
     # 7. Crear sesión de combate en Campaña 1 y solicitar iniciativa interactiva
     import secrets
     session_code = f"S{secrets.token_hex(2).upper()}"
-    dm_session_token = f"dm_tok_{secrets.token_hex(4)}"
     with get_db() as db:
         s_cur = db.execute(
             "INSERT INTO sessions (code, status, round, dm_token, campaign_id, created_by_user_id, created_at) "
-            "VALUES (?, 'active', 1, ?, ?, ?, datetime('now'))",
-            (session_code, dm_session_token, camp1_id, dm1_id),
+            "VALUES (?, 'active', 1, '', ?, ?, datetime('now'))",
+            (session_code, camp1_id, dm1_id),
         )
         s1_id = s_cur.lastrowid
 
@@ -329,7 +328,7 @@ async def run_checks():
     print("[OK   ] 12. Superusuario fuerza tirada fuera de su campaña -> 200 + evento admin_action")
 
     # 13. Cancel por cierre de sesión
-    await close_session(x_dm_token=dm_session_token)
+    await close_session(x_user_token=dm1_token)
     with get_db() as db:
         closed_req = db.execute("SELECT status FROM initiative_requests WHERE id=?", (req3_id,)).fetchone()
         assert closed_req["status"] == "cancelled"
@@ -350,12 +349,11 @@ async def run_checks():
 
     # 15. Validación roll_value fuera de [1,20] devuelve 400 INVALID_ROLL y no altera iniciativa
     s2_code = f"S{secrets.token_hex(2).upper()}"
-    s2_dm_token = f"dm_tok_{secrets.token_hex(4)}"
     with get_db() as db:
         s2_cur = db.execute(
             "INSERT INTO sessions (code, status, round, dm_token, campaign_id, created_by_user_id, created_at) "
-            "VALUES (?, 'active', 1, ?, ?, ?, datetime('now'))",
-            (s2_code, s2_dm_token, camp1_id, dm1_id),
+            "VALUES (?, 'active', 1, '', ?, ?, datetime('now'))",
+            (s2_code, camp1_id, dm1_id),
         )
         s2_id = s2_cur.lastrowid
         # Enemigo (dex_mod=1)

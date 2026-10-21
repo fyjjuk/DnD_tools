@@ -67,22 +67,92 @@ def fetch_active_session(db):
     ).fetchone()
 
 
-def require_dm(db, token):
+def _is_user_authorized_dm(db, session, user_row) -> bool:
+    if user_row["is_superuser"] == 1:
+        return True
+    if session["campaign_id"]:
+        m = db.execute(
+            "SELECT 1 FROM campaign_members WHERE campaign_id=? AND user_id=? AND role='dm'",
+            (session["campaign_id"], user_row["id"]),
+        ).fetchone()
+        if m:
+            return True
+    if session["created_by_user_id"] and session["created_by_user_id"] == user_row["id"]:
+        return True
+    if user_row["username"] == "dm":
+        return True
+    return False
+
+
+def _clean_token(t) -> Optional[str]:
+    if isinstance(t, str) and t.strip():
+        return t.strip()
+    return None
+
+
+def require_dm(db, x_dm_token: Optional[str] = None, x_user_token: Optional[str] = None):
+    x_dm_token = _clean_token(x_dm_token)
+    x_user_token = _clean_token(x_user_token)
+
     session = fetch_active_session(db)
     if session is None:
         raise HTTPException(status_code=404, detail="No hay sesion activa")
-    if not token or token != session["dm_token"]:
-        raise HTTPException(status_code=403, detail="Token de DM invalido")
-    return session
+
+    # 1. Prioridad: X-User-Token si viene especificado
+    if x_user_token:
+        user_row = db.execute(
+            "SELECT u.* FROM users u JOIN user_sessions us ON us.user_id=u.id "
+            "WHERE us.token=? AND us.revoked_at IS NULL AND us.expires_at > ?",
+            (x_user_token, now()),
+        ).fetchone()
+        if user_row and _is_user_authorized_dm(db, session, user_row):
+            return session
+
+    # 2. Si x_dm_token fue provisto, verificar si es en realidad un token de usuario o el legacy dm_token
+    if x_dm_token:
+        user_row = db.execute(
+            "SELECT u.* FROM users u JOIN user_sessions us ON us.user_id=u.id "
+            "WHERE us.token=? AND us.revoked_at IS NULL AND us.expires_at > ?",
+            (x_dm_token, now()),
+        ).fetchone()
+        if user_row and _is_user_authorized_dm(db, session, user_row):
+            return session
+
+        # Legacy fallback
+        if session["dm_token"] and x_dm_token == session["dm_token"]:
+            return session
+
+    raise HTTPException(status_code=403, detail="Token de DM invalido")
 
 
-def require_any_dm(db, token):
-    """Acepta cualquier dm_token existente (activo o cerrado)."""
+def require_any_dm(db, x_dm_token: Optional[str] = None, x_user_token: Optional[str] = None):
+    """Acepta cualquier DM (activo o cerrado) por X-User-Token o legacy dm_token."""
+    x_dm_token = _clean_token(x_dm_token)
+    x_user_token = _clean_token(x_user_token)
+    token = x_user_token or x_dm_token
     if not token:
         raise HTTPException(status_code=403, detail="Token de DM requerido")
-    row = db.execute("SELECT 1 FROM sessions WHERE dm_token=?", (token,)).fetchone()
-    if row is None:
-        raise HTTPException(status_code=403, detail="Token de DM invalido")
+
+    user_row = db.execute(
+        "SELECT u.* FROM users u JOIN user_sessions us ON us.user_id=u.id "
+        "WHERE us.token=? AND us.revoked_at IS NULL AND us.expires_at > ?",
+        (token, now()),
+    ).fetchone()
+    if user_row:
+        if user_row["is_superuser"] == 1 or user_row["username"] == "dm":
+            return user_row
+        m = db.execute(
+            "SELECT 1 FROM campaign_members WHERE user_id=? AND role='dm'",
+            (user_row["id"],),
+        ).fetchone()
+        if m:
+            return user_row
+
+    row = db.execute("SELECT 1 FROM sessions WHERE dm_token=? AND dm_token != ''", (token,)).fetchone()
+    if row is not None:
+        return None
+
+    raise HTTPException(status_code=403, detail="Token de DM invalido")
 
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -114,6 +184,37 @@ def apply_hp(db, session, combatant, delta=None, set_to=None):
                   f"{new - old} de curacion a {combatant['name']} ({old} -> {new})")
     if old > 0 and new <= 0:
         log_event(db, session["id"], "death", f"{combatant['name']} ha caido")
+
+
+ABILITY_NAMES = {
+    "str": "Fuerza",
+    "dex": "Destreza",
+    "con": "Constitución",
+    "int": "Inteligencia",
+    "wis": "Sabiduría",
+    "cha": "Carisma",
+}
+
+SKILL_INFO = {
+    "athletics": {"name": "Atletismo", "ability": "str"},
+    "acrobatics": {"name": "Acrobacias", "ability": "dex"},
+    "sleight-of-hand": {"name": "Juego de Manos", "ability": "dex"},
+    "stealth": {"name": "Sigilo", "ability": "dex"},
+    "arcana": {"name": "Arcano", "ability": "int"},
+    "history": {"name": "Historia", "ability": "int"},
+    "investigation": {"name": "Investigación", "ability": "int"},
+    "nature": {"name": "Naturaleza", "ability": "int"},
+    "religion": {"name": "Religión", "ability": "int"},
+    "animal-handling": {"name": "Trato con Animales", "ability": "wis"},
+    "insight": {"name": "Perspicacia", "ability": "wis"},
+    "medicine": {"name": "Medicina", "ability": "wis"},
+    "perception": {"name": "Percepción", "ability": "wis"},
+    "survival": {"name": "Supervivencia", "ability": "wis"},
+    "deception": {"name": "Engaño", "ability": "cha"},
+    "intimidation": {"name": "Intimidación", "ability": "cha"},
+    "performance": {"name": "Actuación", "ability": "cha"},
+    "persuasion": {"name": "Persuasión", "ability": "cha"},
+}
 
 
 def build_state(session, combatants, players, role, player_id):
@@ -150,6 +251,7 @@ def build_state(session, combatants, players, role, player_id):
                 campaign_join_code = row["join_code"]
 
     active_req = None
+    active_check = None
     with get_db() as db:
         req = db.execute(
             "SELECT * FROM initiative_requests WHERE session_id=? AND status='active' ORDER BY id DESC LIMIT 1",
@@ -187,6 +289,62 @@ def build_state(session, combatants, players, role, player_id):
                 "total_count": len(rolls),
             }
 
+        c_req = db.execute(
+            "SELECT * FROM check_requests WHERE session_id=? AND status='active' ORDER BY id DESC LIMIT 1",
+            (session["id"],),
+        ).fetchone()
+        if c_req is not None:
+            c_rolls = db.execute(
+                """SELECT r.*, c.name AS combatant_name, c.kind 
+                   FROM check_rolls r
+                   JOIN combatants c ON c.id = r.combatant_id
+                   WHERE r.request_id = ?
+                   ORDER BY r.id ASC""",
+                (c_req["id"],),
+            ).fetchall()
+            is_secret = bool(c_req["is_secret"])
+            is_dm = (role == "dm")
+
+            sk_info = SKILL_INFO.get(c_req["skill_slug"]) if c_req["skill_slug"] else None
+            skill_name = sk_info["name"] if sk_info else None
+            ability_name = ABILITY_NAMES.get(c_req["ability"], c_req["ability"].upper())
+
+            active_check = {
+                "id": c_req["id"],
+                "ability": c_req["ability"],
+                "ability_name": ability_name,
+                "skill_slug": c_req["skill_slug"],
+                "skill_name": skill_name,
+                "dc": c_req["dc"] if (is_dm or not is_secret) else None,
+                "is_secret": is_secret,
+                "advantage_mode": c_req["advantage_mode"],
+                "status": c_req["status"],
+                "created_at": c_req["created_at"],
+                "pending_count": sum(1 for r in c_rolls if r["status"] == "pending"),
+                "total_count": len(c_rolls),
+                "rolls": [
+                    {
+                        "id": r["id"],
+                        "combatant_id": r["combatant_id"],
+                        "combatant_name": r["combatant_name"],
+                        "kind": r["kind"],
+                        "user_id": r["user_id"],
+                        "status": r["status"],
+                        "source": r["source"] if "source" in r.keys() else "unknown",
+                        "ability_mod": r["ability_mod"],
+                        "prof_bonus": r["prof_bonus"],
+                        "is_proficient": bool(r["is_proficient"]),
+                        "total_mod": r["total_mod"],
+                        "roll_value_1": r["roll_value_1"],
+                        "roll_value_2": r["roll_value_2"],
+                        "chosen_roll": r["chosen_roll"],
+                        "total": r["total"],
+                        "is_success": (bool(r["is_success"]) if r["is_success"] is not None else None) if (is_dm or not is_secret) else None,
+                    }
+                    for r in c_rolls
+                ],
+            }
+
     return {
         "type": "state",
         "session": {
@@ -201,6 +359,7 @@ def build_state(session, combatants, players, role, player_id):
         "combatants": out,
         "players": [{"id": p["id"], "name": p["name"]} for p in players],
         "initiative_request": active_req,
+        "check_request": active_check,
     }
 
 
@@ -286,9 +445,9 @@ async def dm_bootstrap(payload: Optional[BootstrapIn] = None):
 
 
 @app.post("/api/session/close")
-async def close_session(x_dm_token: Optional[str] = Header(None)):
+async def close_session(x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         sid, code = session["id"], session["code"]
         log_event(db, sid, "session", "Sesion cerrada por el DM")
         ts = now()
@@ -299,6 +458,14 @@ async def close_session(x_dm_token: Optional[str] = Header(None)):
         )
         db.execute(
             "UPDATE initiative_rolls SET status='cancelled' WHERE session_id=? AND status='pending'",
+            (sid,),
+        )
+        db.execute(
+            "UPDATE check_requests SET status='cancelled', closed_at=? WHERE session_id=? AND status='active'",
+            (ts, sid),
+        )
+        db.execute(
+            "UPDATE check_rolls SET status='cancelled' WHERE session_id=? AND status='pending'",
             (sid,),
         )
         events = db.execute(
@@ -488,7 +655,7 @@ async def my_hp(payload: HpIn, x_player_token: Optional[str] = Header(None)):
 # ---------------------------------------------------------------- combate
 
 @app.post("/api/combatants")
-async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header(None)):
+async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     name = (payload.name or "").strip()
     hp_max = payload.hp_max
 
@@ -524,7 +691,7 @@ async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header
         dex_mod = (srd["dexterity"] - 10) // 2
 
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         cur = db.execute(
             "INSERT INTO combatants (session_id, name, hp_max, hp_current, initiative, kind, dex_mod, created_at) "
             "VALUES (?,?,?,?,?,?,?,?)",
@@ -566,9 +733,9 @@ async def add_combatant(payload: CombatantIn, x_dm_token: Optional[str] = Header
 
 
 @app.delete("/api/combatants/{cid}")
-async def remove_combatant(cid: int, x_dm_token: Optional[str] = Header(None)):
+async def remove_combatant(cid: int, x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         c = db.execute(
             "SELECT * FROM combatants WHERE id=? AND session_id=?", (cid, session["id"])
         ).fetchone()
@@ -594,9 +761,9 @@ async def remove_combatant(cid: int, x_dm_token: Optional[str] = Header(None)):
 
 
 @app.post("/api/combatants/{cid}/hp")
-async def change_hp(cid: int, payload: HpIn, x_dm_token: Optional[str] = Header(None)):
+async def change_hp(cid: int, payload: HpIn, x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         c = db.execute(
             "SELECT * FROM combatants WHERE id=? AND session_id=?", (cid, session["id"])
         ).fetchone()
@@ -610,9 +777,9 @@ async def change_hp(cid: int, payload: HpIn, x_dm_token: Optional[str] = Header(
 
 
 @app.post("/api/combatants/{cid}/undo-hp")
-async def undo_hp(cid: int, x_dm_token: Optional[str] = Header(None)):
+async def undo_hp(cid: int, x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         c = db.execute(
             "SELECT * FROM combatants WHERE id=? AND session_id=?", (cid, session["id"])
         ).fetchone()
@@ -627,7 +794,7 @@ async def undo_hp(cid: int, x_dm_token: Optional[str] = Header(None)):
         db.execute("UPDATE combatants SET hp_current=? WHERE id=?", (last["old_hp"], cid))
         db.execute("UPDATE hp_history SET undone=1 WHERE id=?", (last["id"],))
         log_event(db, session["id"], "undo",
-                  f"Deshecho HP de {c['name']}: {last['new_hp']} -> {last['old_hp']}")
+                   f"Deshecho HP de {c['name']}: {last['new_hp']} -> {last['old_hp']}")
         sid = session["id"]
 
     await broadcast_state(sid)
@@ -635,9 +802,9 @@ async def undo_hp(cid: int, x_dm_token: Optional[str] = Header(None)):
 
 
 @app.post("/api/combatants/{cid}/link")
-async def link_player(cid: int, payload: LinkIn, x_dm_token: Optional[str] = Header(None)):
+async def link_player(cid: int, payload: LinkIn, x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         c = db.execute(
             "SELECT * FROM combatants WHERE id=? AND session_id=?", (cid, session["id"])
         ).fetchone()
@@ -669,9 +836,9 @@ async def link_player(cid: int, payload: LinkIn, x_dm_token: Optional[str] = Hea
 
 
 @app.post("/api/turn/next")
-async def next_turn(x_dm_token: Optional[str] = Header(None)):
+async def next_turn(x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         combatants = db.execute(
             "SELECT * FROM combatants WHERE session_id=? ORDER BY initiative DESC, id ASC",
             (session["id"],),
@@ -721,9 +888,9 @@ async def next_turn(x_dm_token: Optional[str] = Header(None)):
 
 
 @app.post("/api/turn/round")
-async def next_round(x_dm_token: Optional[str] = Header(None)):
+async def next_round(x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        session = require_dm(db, x_dm_token)
+        session = require_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         combatants = db.execute(
             "SELECT * FROM combatants WHERE session_id=? ORDER BY initiative DESC, id ASC",
             (session["id"],),
@@ -746,9 +913,9 @@ async def next_round(x_dm_token: Optional[str] = Header(None)):
 # ---------------------------------------------------------------- logs
 
 @app.get("/api/sessions/closed")
-async def list_closed_sessions(x_dm_token: Optional[str] = Header(None)):
+async def list_closed_sessions(x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        require_any_dm(db, x_dm_token)
+        require_any_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         rows = db.execute("""
             SELECT s.code, s.closed_at,
                    (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) AS n_events
@@ -764,9 +931,9 @@ async def list_closed_sessions(x_dm_token: Optional[str] = Header(None)):
 
 
 @app.get("/api/sessions/{code}/log")
-async def get_session_log(code: str, x_dm_token: Optional[str] = Header(None)):
+async def get_session_log(code: str, x_dm_token: Optional[str] = Header(None), x_user_token: Optional[str] = Header(None)):
     with get_db() as db:
-        require_any_dm(db, x_dm_token)
+        require_any_dm(db, x_dm_token=x_dm_token, x_user_token=x_user_token)
         session = db.execute(
             "SELECT * FROM sessions WHERE code=?", (code.upper(),)
         ).fetchone()
@@ -1306,10 +1473,25 @@ async def websocket_endpoint(websocket: WebSocket, role: str = "player", token: 
 
     with get_db() as db:
         if role == "dm":
-            session = db.execute(
-                "SELECT * FROM sessions WHERE dm_token = ? AND status = 'active'",
-                (token,),
-            ).fetchone()
+            session = None
+            active_s = fetch_active_session(db)
+            if active_s and token:
+                # 1. Verificar si token es de un usuario DM o Superusuario de la sesion activa
+                user_row = db.execute(
+                    "SELECT u.* FROM users u JOIN user_sessions us ON us.user_id=u.id "
+                    "WHERE us.token=? AND us.revoked_at IS NULL AND us.expires_at > ?",
+                    (token, now()),
+                ).fetchone()
+                if user_row and _is_user_authorized_dm(db, active_s, user_row):
+                    session = active_s
+
+            # 2. Fallback legacy: dm_token de la sesion activa
+            if session is None and token:
+                session = db.execute(
+                    "SELECT * FROM sessions WHERE dm_token = ? AND status = 'active' AND dm_token != ''",
+                    (token,),
+                ).fetchone()
+
             if session is None:
                 # FIX I3: accept() antes de close() para que el cliente
                 # reciba un close frame WS con code=4003. Si se cierra
@@ -2552,6 +2734,483 @@ async def initiative_request_cancel(
             log_event(db, req["session_id"], "admin_action", f"Superusuario '{user['username']}' canceló la iniciativa")
         else:
             log_event(db, req["session_id"], "system", "Tirada de iniciativa cancelada por el DM")
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True}
+
+
+# ================================================================
+# Fase 2.4.2: Tiradas de Habilidad / Checks
+# ================================================================
+
+class CheckRequestIn(BaseModel):
+    ability: Optional[str] = "str"
+    skill_slug: Optional[str] = None
+    dc: int
+    is_secret: Optional[bool] = False
+    advantage_mode: Optional[str] = "normal"  # 'normal', 'advantage', 'disadvantage'
+    target_combatant_ids: Optional[List[int]] = None
+
+
+class CheckRollIn(BaseModel):
+    request_id: int
+    combatant_id: int
+    roll_value_1: int
+    roll_value_2: Optional[int] = None
+
+
+class CheckActionIn(BaseModel):
+    request_id: int
+    combatant_id: int
+
+
+class CheckCancelIn(BaseModel):
+    request_id: int
+
+
+def _get_combatant_check_info(db, combatant, ability: str, skill_slug: Optional[str] = None):
+    ability = (ability or "str").lower()[:3]
+    char = None
+    uid = combatant["user_id"]
+    if combatant["character_id"]:
+        char = db.execute("SELECT * FROM characters WHERE id=?", (combatant["character_id"],)).fetchone()
+        if char and char["user_id"]:
+            uid = char["user_id"]
+    elif not uid and combatant["player_id"]:
+        p_row = db.execute("SELECT token FROM players WHERE id=?", (combatant["player_id"],)).fetchone()
+        if p_row:
+            us_row = db.execute(
+                "SELECT user_id FROM user_sessions WHERE token=?", (p_row["token"],)
+            ).fetchone()
+            if us_row:
+                uid = us_row["user_id"]
+
+    ability_mod = 0
+    prof_bonus = 2
+    is_proficient = False
+
+    if char:
+        try:
+            cdata = json.loads(char["data"]) if char["data"] else {}
+        except Exception:
+            cdata = {}
+        modifiers = cdata.get("modifiers") or {}
+        ability_mod = modifiers.get(f"{ability}_mod", 0)
+        prof_bonus = cdata.get("proficiency_bonus", 2)
+        if skill_slug:
+            skill_profs = cdata.get("skill_proficiencies") or []
+            if skill_slug in skill_profs:
+                is_proficient = True
+    elif combatant["kind"] == "enemy":
+        score = 10
+        prof_bonus = 2
+        is_proficient = False
+        if "srd_index" in combatant.keys() and combatant["srd_index"]:
+            try:
+                with get_srd_db() as sdb:
+                    mrow = sdb.execute("SELECT * FROM monsters WHERE index_slug=?", (combatant["srd_index"],)).fetchone()
+                    if mrow:
+                        ability_col_map = {"str": "strength", "dex": "dexterity", "con": "constitution", "int": "intelligence", "wis": "wisdom", "cha": "charisma"}
+                        col = ability_col_map.get(ability, "strength")
+                        if col in mrow.keys() and mrow[col] is not None:
+                            score = mrow[col]
+                        if mrow["proficiency_bonus"]:
+                            prof_bonus = mrow["proficiency_bonus"]
+                        if skill_slug:
+                            m_data = json.loads(mrow["data"]) if mrow["data"] else {}
+                            for p in (m_data.get("proficiencies") or []):
+                                p_idx = p.get("proficiency", {}).get("index", "")
+                                if p_idx in (f"skill-{skill_slug}", skill_slug):
+                                    is_proficient = True
+                                    break
+            except Exception:
+                pass
+        elif ability == "dex" and combatant["dex_mod"] is not None:
+            ability_mod = combatant["dex_mod"]
+            return ability_mod, prof_bonus, 0, ability_mod, None
+
+        ability_mod = (score - 10) // 2
+    else:
+        # PC sin ficha de personaje
+        if ability == "dex" and combatant["dex_mod"] is not None:
+            ability_mod = combatant["dex_mod"]
+        else:
+            ability_mod = 0
+        prof_bonus = 2
+        is_proficient = False
+
+    total_mod = ability_mod + (prof_bonus if is_proficient else 0)
+    return ability_mod, prof_bonus, 1 if is_proficient else 0, total_mod, uid
+
+
+def _evaluate_check_roll(r1: int, r2: Optional[int], advantage_mode: str) -> int:
+    if advantage_mode == "advantage":
+        if r2 is not None:
+            return max(r1, r2)
+        return r1
+    elif advantage_mode == "disadvantage":
+        if r2 is not None:
+            return min(r1, r2)
+        return r1
+    return r1
+
+
+@app.post("/api/sessions/{session_id}/check/request")
+async def check_request_create(
+    session_id: int,
+    payload: CheckRequestIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    if not (1 <= payload.dc <= 40):
+        raise ApiError(400, "CD inválida (debe estar entre 1 y 40)", "INVALID_DC")
+
+    adv_mode = payload.advantage_mode or "normal"
+    if adv_mode not in ("normal", "advantage", "disadvantage"):
+        raise ApiError(400, "Modo de ventaja inválido", "INVALID_ADVANTAGE_MODE")
+
+    skill_slug = payload.skill_slug
+    ability = (payload.ability or "str").lower()[:3]
+    if skill_slug:
+        sk_entry = SKILL_INFO.get(skill_slug)
+        if sk_entry:
+            ability = sk_entry["ability"]
+    if ability not in ABILITY_NAMES:
+        raise ApiError(400, "Característica inválida", "INVALID_ABILITY")
+
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if session is None or session["status"] != "active":
+            raise ApiError(400, "Sesión no encontrada o inactiva", "SESSION_NOT_ACTIVE")
+
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "No tienes permiso para solicitar tiradas de habilidad", "FORBIDDEN")
+
+        ts = now()
+        db.execute(
+            "UPDATE check_requests SET status='cancelled', closed_at=? WHERE session_id=? AND status='active'",
+            (ts, session_id),
+        )
+        db.execute(
+            "UPDATE check_rolls SET status='cancelled' WHERE session_id=? AND status='pending'",
+            (session_id,),
+        )
+
+        is_sec = 1 if payload.is_secret else 0
+        cur = db.execute(
+            "INSERT INTO check_requests (session_id, ability, skill_slug, dc, is_secret, advantage_mode, status, created_by_user_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+            (session_id, ability, skill_slug, payload.dc, is_sec, adv_mode, user["id"], ts),
+        )
+        req_id = cur.lastrowid
+
+        if payload.target_combatant_ids:
+            placeholders = ",".join("?" * len(payload.target_combatant_ids))
+            combatants = db.execute(
+                f"SELECT * FROM combatants WHERE session_id=? AND id IN ({placeholders})",
+                (session_id, *payload.target_combatant_ids),
+            ).fetchall()
+        else:
+            combatants = db.execute(
+                "SELECT * FROM combatants WHERE session_id=? AND kind='pc'", (session_id,)
+            ).fetchall()
+
+        sk_entry = SKILL_INFO.get(skill_slug) if skill_slug else None
+        check_title = sk_entry["name"] if sk_entry else f"Característica ({ABILITY_NAMES[ability]})"
+
+        for c in combatants:
+            a_mod, p_bonus, is_prof, tot_mod, uid = _get_combatant_check_info(db, c, ability, skill_slug)
+            if c["kind"] == "enemy":
+                r1 = random.randint(1, 20)
+                r2 = random.randint(1, 20) if adv_mode in ("advantage", "disadvantage") else None
+                chosen = _evaluate_check_roll(r1, r2, adv_mode)
+                tot = chosen + tot_mod
+                is_succ = 1 if tot >= payload.dc else 0
+                db.execute(
+                    "INSERT INTO check_rolls (request_id, session_id, combatant_id, user_id, ability_mod, prof_bonus, is_proficient, total_mod, roll_value_1, roll_value_2, chosen_roll, total, is_success, status, source, rolled_at) "
+                    "VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rolled', 'npc_auto', ?)",
+                    (req_id, session_id, c["id"], a_mod, p_bonus, is_prof, tot_mod, r1, r2, chosen, tot, is_succ, ts),
+                )
+                log_event(db, session_id, "roll", f"{c['name']} (enemigo) tiró prueba de {check_title}: {chosen} + {tot_mod} = {tot} (CD {payload.dc}) -> {'ÉXITO' if is_succ else 'FALLO'}")
+            else:
+                db.execute(
+                    "INSERT INTO check_rolls (request_id, session_id, combatant_id, user_id, ability_mod, prof_bonus, is_proficient, total_mod, roll_value_1, roll_value_2, chosen_roll, total, is_success, status, source, rolled_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, 'pending', 'unknown', NULL)",
+                    (req_id, session_id, c["id"], uid, a_mod, p_bonus, is_prof, tot_mod),
+                )
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM check_rolls WHERE request_id=? AND status='pending'",
+            (req_id,),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE check_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req_id),
+            )
+
+        sec_text = " [SECRETA]" if is_sec else ""
+        if is_admin_override:
+            log_event(db, session_id, "admin_action", f"Superusuario '{user['username']}' pidió prueba de {check_title} (CD {payload.dc}){sec_text}")
+        else:
+            log_event(db, session_id, "combat", f"DM pidió prueba de {check_title} (CD {payload.dc}){sec_text}")
+
+    await broadcast_state(session_id)
+    return {"ok": True, "request_id": req_id}
+
+
+@app.post("/api/check/roll")
+async def check_roll_submit(
+    payload: CheckRollIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    if not (1 <= payload.roll_value_1 <= 20):
+        raise ApiError(400, "Tirada inválida (debe estar entre 1 y 20)", "INVALID_ROLL")
+    if payload.roll_value_2 is not None and not (1 <= payload.roll_value_2 <= 20):
+        raise ApiError(400, "Tirada 2 inválida (debe estar entre 1 y 20)", "INVALID_ROLL")
+
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        roll = db.execute(
+            "SELECT * FROM check_rolls WHERE request_id=? AND combatant_id=?",
+            (payload.request_id, payload.combatant_id),
+        ).fetchone()
+        if roll is None:
+            raise ApiError(404, "Tirada no encontrada", "NOT_FOUND")
+
+        req = db.execute("SELECT * FROM check_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None or req["status"] != "active":
+            raise ApiError(400, "La solicitud de prueba no está activa", "REQUEST_NOT_ACTIVE")
+
+        if roll["status"] != "pending":
+            raise ApiError(409, "Esta tirada ya fue enviada o resuelta", "ALREADY_ROLLED")
+
+        c = db.execute("SELECT * FROM combatants WHERE id=?", (payload.combatant_id,)).fetchone()
+        if c is None:
+            raise ApiError(404, "Combatiente no encontrado", "NOT_FOUND")
+
+        allowed = bool(user["is_superuser"])
+        if not allowed:
+            if roll["user_id"] == user["id"] or c["user_id"] == user["id"]:
+                allowed = True
+            elif c["character_id"]:
+                char = db.execute("SELECT user_id FROM characters WHERE id=?", (c["character_id"],)).fetchone()
+                if char and char["user_id"] == user["id"]:
+                    allowed = True
+            elif c["player_id"]:
+                p_row = db.execute("SELECT token FROM players WHERE id=?", (c["player_id"],)).fetchone()
+                if p_row:
+                    us_row = db.execute(
+                        "SELECT user_id FROM user_sessions WHERE token=?", (p_row["token"],)
+                    ).fetchone()
+                    if us_row and us_row["user_id"] == user["id"]:
+                        allowed = True
+        if not allowed:
+            raise ApiError(403, "No tienes permiso para tirar por este combatiente", "FORBIDDEN")
+
+        chosen = _evaluate_check_roll(payload.roll_value_1, payload.roll_value_2, req["advantage_mode"])
+        tot = chosen + roll["total_mod"]
+        is_succ = 1 if tot >= req["dc"] else 0
+        ts = now()
+
+        db.execute(
+            "UPDATE check_rolls SET roll_value_1=?, roll_value_2=?, chosen_roll=?, total=?, is_success=?, status='rolled', source='player', rolled_at=? WHERE id=?",
+            (payload.roll_value_1, payload.roll_value_2, chosen, tot, is_succ, ts, roll["id"]),
+        )
+
+        sk_entry = SKILL_INFO.get(req["skill_slug"]) if req["skill_slug"] else None
+        check_title = sk_entry["name"] if sk_entry else f"Característica ({ABILITY_NAMES.get(req['ability'], req['ability'].upper())})"
+
+        if req["is_secret"]:
+            log_event(db, req["session_id"], "roll", f"{c['name']} realizó tirada secreta para prueba de {check_title}")
+        else:
+            verdict = "ÉXITO" if is_succ else "FALLO"
+            log_event(db, req["session_id"], "roll", f"{c['name']} tiró prueba de {check_title}: d20={chosen} + mod={roll['total_mod']} = {tot} frente a CD {req['dc']} -> {verdict}")
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM check_rolls WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE check_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req["id"]),
+            )
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {
+        "ok": True,
+        "total": tot,
+        "chosen_roll": chosen,
+        "total_mod": roll["total_mod"],
+        "is_success": bool(is_succ) if not req["is_secret"] else None,
+    }
+
+
+@app.post("/api/check/force")
+async def check_roll_force(
+    payload: CheckActionIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        roll = db.execute(
+            "SELECT * FROM check_rolls WHERE request_id=? AND combatant_id=?",
+            (payload.request_id, payload.combatant_id),
+        ).fetchone()
+        if roll is None:
+            raise ApiError(404, "Tirada no encontrada", "NOT_FOUND")
+
+        req = db.execute("SELECT * FROM check_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None or req["status"] != "active":
+            raise ApiError(400, "La solicitud de prueba no está activa", "REQUEST_NOT_ACTIVE")
+
+        if roll["status"] != "pending":
+            raise ApiError(409, "Esta tirada ya fue resuelta", "ALREADY_ROLLED")
+
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (req["session_id"],)).fetchone()
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "Solo el DM o un superusuario pueden forzar tiradas", "FORBIDDEN")
+
+        c = db.execute("SELECT * FROM combatants WHERE id=?", (payload.combatant_id,)).fetchone()
+        c_name = c["name"] if c else "Combatiente"
+        adv_mode = req["advantage_mode"]
+
+        r1 = random.randint(1, 20)
+        r2 = random.randint(1, 20) if adv_mode in ("advantage", "disadvantage") else None
+        chosen = _evaluate_check_roll(r1, r2, adv_mode)
+        tot = chosen + roll["total_mod"]
+        is_succ = 1 if tot >= req["dc"] else 0
+        ts = now()
+        src = "superuser_force" if is_admin_override else "dm_force"
+
+        db.execute(
+            "UPDATE check_rolls SET roll_value_1=?, roll_value_2=?, chosen_roll=?, total=?, is_success=?, status='forced', source=?, rolled_at=? WHERE id=?",
+            (r1, r2, chosen, tot, is_succ, src, ts, roll["id"]),
+        )
+
+        sk_entry = SKILL_INFO.get(req["skill_slug"]) if req["skill_slug"] else None
+        check_title = sk_entry["name"] if sk_entry else f"Característica ({ABILITY_NAMES.get(req['ability'], req['ability'].upper())})"
+        verdict = "ÉXITO" if is_succ else "FALLO"
+
+        actor = f"Superusuario '{user['username']}'" if is_admin_override else "DM"
+        log_kind = "admin_action" if is_admin_override else "roll"
+        log_event(db, req["session_id"], log_kind, f"{actor} forzó prueba de {check_title} de {c_name}: {chosen} + {roll['total_mod']} = {tot} frente a CD {req['dc']} -> {verdict}")
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM check_rolls WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE check_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req["id"]),
+            )
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True, "total": tot, "chosen_roll": chosen, "total_mod": roll["total_mod"], "is_success": bool(is_succ)}
+
+
+@app.post("/api/check/skip")
+async def check_roll_skip(
+    payload: CheckActionIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        roll = db.execute(
+            "SELECT * FROM check_rolls WHERE request_id=? AND combatant_id=?",
+            (payload.request_id, payload.combatant_id),
+        ).fetchone()
+        if roll is None:
+            raise ApiError(404, "Tirada no encontrada", "NOT_FOUND")
+
+        req = db.execute("SELECT * FROM check_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None or req["status"] != "active":
+            raise ApiError(400, "La solicitud de prueba no está activa", "REQUEST_NOT_ACTIVE")
+
+        if roll["status"] != "pending":
+            raise ApiError(409, "Esta tirada ya fue resuelta", "ALREADY_ROLLED")
+
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (req["session_id"],)).fetchone()
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "Solo el DM o un superusuario pueden saltar tiradas", "FORBIDDEN")
+
+        c = db.execute("SELECT * FROM combatants WHERE id=?", (payload.combatant_id,)).fetchone()
+        c_name = c["name"] if c else "Combatiente"
+        chosen = 10
+        tot = chosen + roll["total_mod"]
+        is_succ = 1 if tot >= req["dc"] else 0
+        ts = now()
+        src = "superuser_skip" if is_admin_override else "dm_skip"
+
+        db.execute(
+            "UPDATE check_rolls SET roll_value_1=10, roll_value_2=NULL, chosen_roll=10, total=?, is_success=?, status='skipped', source=?, rolled_at=? WHERE id=?",
+            (tot, is_succ, src, ts, roll["id"]),
+        )
+
+        sk_entry = SKILL_INFO.get(req["skill_slug"]) if req["skill_slug"] else None
+        check_title = sk_entry["name"] if sk_entry else f"Característica ({ABILITY_NAMES.get(req['ability'], req['ability'].upper())})"
+        verdict = "ÉXITO" if is_succ else "FALLO"
+
+        actor = f"Superusuario '{user['username']}'" if is_admin_override else "DM"
+        log_kind = "admin_action" if is_admin_override else "roll"
+        log_event(db, req["session_id"], log_kind, f"{actor} saltó prueba (toma 10) de {check_title} de {c_name}: 10 + {roll['total_mod']} = {tot} frente a CD {req['dc']} -> {verdict}")
+
+        pending = db.execute(
+            "SELECT COUNT(*) AS c FROM check_rolls WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        ).fetchone()["c"]
+        if pending == 0:
+            db.execute(
+                "UPDATE check_requests SET status='completed', closed_at=? WHERE id=?",
+                (ts, req["id"]),
+            )
+        sid = req["session_id"]
+
+    await broadcast_state(sid)
+    return {"ok": True, "total": tot, "chosen_roll": 10, "total_mod": roll["total_mod"], "is_success": bool(is_succ)}
+
+
+@app.post("/api/check/cancel")
+async def check_request_cancel(
+    payload: CheckCancelIn,
+    x_user_token: Optional[str] = Header(None),
+):
+    with get_db() as db:
+        user = require_user(db, x_user_token)
+        req = db.execute("SELECT * FROM check_requests WHERE id=?", (payload.request_id,)).fetchone()
+        if req is None:
+            raise ApiError(404, "Solicitud no encontrada", "NOT_FOUND")
+
+        session = db.execute("SELECT * FROM sessions WHERE id=?", (req["session_id"],)).fetchone()
+        authorized, is_admin_override = check_is_session_dm_or_superuser(db, user, session)
+        if not authorized:
+            raise ApiError(403, "Solo el DM o un superusuario pueden cancelar la prueba", "FORBIDDEN")
+
+        ts = now()
+        db.execute(
+            "UPDATE check_requests SET status='cancelled', closed_at=? WHERE id=?",
+            (ts, req["id"]),
+        )
+        db.execute(
+            "UPDATE check_rolls SET status='cancelled' WHERE request_id=? AND status='pending'",
+            (req["id"],),
+        )
+
+        sk_entry = SKILL_INFO.get(req["skill_slug"]) if req["skill_slug"] else None
+        check_title = sk_entry["name"] if sk_entry else f"Característica ({ABILITY_NAMES.get(req['ability'], req['ability'].upper())})"
+
+        if is_admin_override:
+            log_event(db, req["session_id"], "admin_action", f"Superusuario '{user['username']}' canceló la prueba de {check_title}")
+        else:
+            log_event(db, req["session_id"], "system", f"Prueba de {check_title} cancelada por el DM")
         sid = req["session_id"]
 
     await broadcast_state(sid)

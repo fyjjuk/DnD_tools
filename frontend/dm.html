@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DM · Combate D&D 5e</title>
-<link rel="stylesheet" href="/static/app.css?v=2.4.1">
+<link rel="stylesheet" href="/static/app.css?v=2.4.2">
 </head>
 <body>
 
@@ -56,19 +56,59 @@
 <section class="panel">
   <div class="row-actions">
     <button id="btn-roll-initiative" class="primary" style="background:#8b5cf6">🎲 Tirar Iniciativa</button>
+    <button id="btn-open-check-panel" class="primary" style="background:#0ea5e9">🎯 Tirada Habilidad</button>
     <button id="btn-next-turn" class="primary">Siguiente turno ▶</button>
     <button id="btn-next-round">Siguiente ronda ⏭</button>
     <button id="btn-recover">Recuperar sesión</button>
     <button id="btn-close" class="danger">Cerrar sesión</button>
   </div>
   <div id="legacy-initiative-note" class="hidden" style="margin-top:10px;font-size:0.9rem;color:#9ca3af">
-    Tirar Iniciativa requiere cuenta de campaña. <a href="/campaigns" style="color:var(--accent, #e0b45c);text-decoration:underline">Iniciar sesión</a>
+    Tirar Iniciativa y Pruebas de Habilidad requieren cuenta de campaña. <a href="/campaigns" style="color:var(--accent, #e0b45c);text-decoration:underline">Iniciar sesión</a>
+  </div>
+</section>
+
+<section id="check-panel" class="panel hidden" style="border:1px solid #0ea5e9;background:rgba(14,165,233,0.06);margin-bottom:12px">
+  <h2 style="color:#0ea5e9;margin-bottom:8px">🎯 Pedir Tirada de Habilidad / Característica</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px;margin-bottom:10px">
+    <div>
+      <label style="font-size:0.8rem;color:#9ca3af;display:block;margin-bottom:4px">Habilidad o Característica</label>
+      <select id="check-select-skill" style="width:100%"></select>
+    </div>
+    <div>
+      <label style="font-size:0.8rem;color:#9ca3af;display:block;margin-bottom:4px">Clase de Dificultad (CD)</label>
+      <input id="check-dc" type="number" min="1" max="40" value="15" style="width:100%">
+    </div>
+    <div>
+      <label style="font-size:0.8rem;color:#9ca3af;display:block;margin-bottom:4px">Modo</label>
+      <select id="check-advantage-mode" style="width:100%">
+        <option value="normal">Normal (1d20)</option>
+        <option value="advantage">Ventaja (2d20kh1)</option>
+        <option value="disadvantage">Desventaja (2d20kl1)</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:0.8rem;color:#9ca3af;display:block;margin-bottom:4px">Destinatarios</label>
+      <select id="check-targets" style="width:100%">
+        <option value="all_pcs">Todos los PJs</option>
+      </select>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:10px">
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem">
+      <input type="checkbox" id="check-is-secret">
+      <span>🤫 Tirada Secreta (ocultar CD y resultado a los jugadores)</span>
+    </label>
+    <div style="display:flex;gap:8px">
+      <button id="btn-close-check-panel" type="button" class="small">Cerrar</button>
+      <button id="btn-send-check-request" type="button" class="primary small" style="background:#0ea5e9">Solicitar a la mesa</button>
+    </div>
   </div>
 </section>
 
 <section class="panel">
   <h2>Orden de iniciativa</h2>
   <div id="initiative-tracker" class="hidden" style="margin-bottom:12px;padding:12px;background:rgba(139,92,246,0.12);border:1px solid #8b5cf6;border-radius:8px"></div>
+  <div id="check-tracker" class="hidden" style="margin-bottom:12px;padding:12px;background:rgba(14,165,233,0.12);border:1px solid #0ea5e9;border-radius:8px"></div>
   <div id="combatants" class="combatants"></div>
 </section>
 
@@ -99,7 +139,7 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=2.4.1"></script>
-<script src="/static/dm.js?v=2.4.1"></script>
+<script src="/static/common.js?v=2.4.2"></script>
+<script src="/static/dm.js?v=2.4.2"></script>
 </body>
 </html>

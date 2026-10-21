@@ -101,8 +101,8 @@ function renderCampaign(c) {
         );
         if (data && data.dm_token) {
           localStorage.setItem("dnd_dm_token", data.dm_token);
-          window.location.href = "/dm";
         }
+        window.location.href = "/dm";
       } catch (e) {
         setMsg("Error abriendo consola: " + e.message, true);
       }

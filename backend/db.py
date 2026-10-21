@@ -178,6 +178,44 @@ CREATE TABLE IF NOT EXISTS initiative_rolls (
 );
 CREATE INDEX IF NOT EXISTS idx_initiative_rolls_request ON initiative_rolls(request_id);
 CREATE INDEX IF NOT EXISTS idx_initiative_rolls_combatant ON initiative_rolls(combatant_id);
+
+CREATE TABLE IF NOT EXISTS check_requests (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id         INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    ability            TEXT NOT NULL,
+    skill_slug         TEXT,
+    dc                 INTEGER NOT NULL,
+    is_secret          INTEGER NOT NULL DEFAULT 0,
+    advantage_mode     TEXT NOT NULL DEFAULT 'normal',
+    status             TEXT NOT NULL DEFAULT 'active',
+    created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+    created_at         TEXT NOT NULL,
+    closed_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_check_requests_session ON check_requests(session_id);
+
+CREATE TABLE IF NOT EXISTS check_rolls (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id    INTEGER NOT NULL REFERENCES check_requests(id) ON DELETE CASCADE,
+    session_id    INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    combatant_id  INTEGER NOT NULL REFERENCES combatants(id) ON DELETE CASCADE,
+    user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    ability_mod   INTEGER NOT NULL DEFAULT 0,
+    prof_bonus    INTEGER NOT NULL DEFAULT 0,
+    is_proficient INTEGER NOT NULL DEFAULT 0,
+    total_mod     INTEGER NOT NULL DEFAULT 0,
+    roll_value_1  INTEGER,
+    roll_value_2  INTEGER,
+    chosen_roll   INTEGER,
+    total         INTEGER,
+    is_success    INTEGER,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    source        TEXT NOT NULL DEFAULT 'unknown',
+    rolled_at     TEXT,
+    UNIQUE(request_id, combatant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_check_rolls_request ON check_rolls(request_id);
+CREATE INDEX IF NOT EXISTS idx_check_rolls_combatant ON check_rolls(combatant_id);
 """
 
 SCHEMA_SRD = """

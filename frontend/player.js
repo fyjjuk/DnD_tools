@@ -125,6 +125,7 @@ function render() {
   renderMe();
   renderList();
   renderInitiativeModal();
+  renderCheckModal();
 }
 
 let rollingInitiative = false;
@@ -195,6 +196,110 @@ function renderInitiativeModal() {
       } catch (err) {
         $("init-modal-result").textContent = "Error: " + err.message;
         rollingInitiative = false;
+        btn.disabled = false;
+      }
+    }, 900);
+  };
+}
+
+let rollingCheck = false;
+
+function renderCheckModal() {
+  const modal = $("check-modal");
+  if (!modal) return;
+  const req = state.check_request;
+  if (!req || req.status !== "active") {
+    modal.classList.add("hidden");
+    rollingCheck = false;
+    return;
+  }
+
+  const myCombatant = state.combatants.find(c => c.is_me);
+  if (!myCombatant) {
+    modal.classList.add("hidden");
+    return;
+  }
+
+  const myRoll = req.rolls ? req.rolls.find(r => r.combatant_id === myCombatant.id) : null;
+  if (!myRoll || myRoll.status !== "pending") {
+    modal.classList.add("hidden");
+    rollingCheck = false;
+    return;
+  }
+
+  modal.classList.remove("hidden");
+  const checkTitle = req.skill_name ? `${req.skill_name} (${req.ability_name})` : `Prueba de ${req.ability_name}`;
+  const dcText = req.dc !== null && req.dc !== undefined ? ` · CD ${req.dc}` : "";
+  const advText = req.advantage_mode === "advantage" ? " · Con Ventaja (2d20)" : req.advantage_mode === "disadvantage" ? " · Con Desventaja (2d20)" : "";
+
+  $("check-modal-title").textContent = `🎯 ${checkTitle}`;
+  $("check-modal-info").textContent = `El DM solicita una tirada para ${myCombatant.name}.${dcText}${advText}\nModificador: ${myRoll.total_mod >= 0 ? '+' : ''}${myRoll.total_mod} (${myRoll.is_proficient ? 'Competente' : 'Sin competencia'})`;
+  $("check-modal-result").textContent = "";
+
+  const btn = $("btn-roll-check");
+  btn.disabled = rollingCheck;
+  const diceCount = req.advantage_mode === "normal" ? "1d20" : "2d20";
+  btn.textContent = `¡Tirar ${diceCount}!`;
+
+  btn.onclick = async () => {
+    if (rollingCheck) return;
+    rollingCheck = true;
+    btn.disabled = true;
+
+    const diceDisplay = $("check-dice-display");
+    const faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+    let animCount = 0;
+    const interval = setInterval(() => {
+      if (req.advantage_mode === "normal") {
+        diceDisplay.textContent = faces[Math.floor(Math.random() * faces.length)];
+      } else {
+        diceDisplay.textContent = `${faces[Math.floor(Math.random() * faces.length)]}  ${faces[Math.floor(Math.random() * faces.length)]}`;
+      }
+      animCount++;
+      if (animCount > 10) clearInterval(interval);
+    }, 80);
+
+    setTimeout(async () => {
+      const r1 = Math.floor(Math.random() * 20) + 1;
+      let r2 = null;
+      if (req.advantage_mode !== "normal") {
+        r2 = Math.floor(Math.random() * 20) + 1;
+        diceDisplay.textContent = `🎲 ${r1}  |  🎲 ${r2}`;
+      } else {
+        diceDisplay.textContent = `🎲 ${r1}`;
+      }
+
+      const userToken = localStorage.getItem("dnd_user_token");
+      try {
+        const res = await API.post(
+          "/api/check/roll",
+          {
+            request_id: req.id,
+            combatant_id: myCombatant.id,
+            roll_value_1: r1,
+            roll_value_2: r2,
+          },
+          { "X-User-Token": userToken || "" }
+        );
+
+        let resText = `Total: ${res.chosen_roll} + (${res.total_mod}) = ${res.total}`;
+        if (res.is_success !== null && res.is_success !== undefined) {
+          resText += res.is_success ? " ➔ ¡ÉXITO! 🎉" : " ➔ FALLO 💥";
+          $("check-modal-result").style.color = res.is_success ? "#10b981" : "#ef4444";
+        } else {
+          resText += " ➔ Tirada enviada al DM 🤫";
+          $("check-modal-result").style.color = "#0ea5e9";
+        }
+        $("check-modal-result").textContent = resText;
+
+        setTimeout(() => {
+          modal.classList.add("hidden");
+          rollingCheck = false;
+        }, 1600);
+      } catch (err) {
+        $("check-modal-result").textContent = "Error: " + err.message;
+        $("check-modal-result").style.color = "#ef4444";
+        rollingCheck = false;
         btn.disabled = false;
       }
     }, 900);

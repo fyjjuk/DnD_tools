@@ -140,17 +140,17 @@ def create_session_in_campaign(db, campaign_id: int, dm_user_id: int):
     )
 
     code = generate_session_code(db)
-    dm_token = secrets.token_urlsafe(18)
+    # L1: Las sesiones de campana no generan tokens basura en user_sessions.
+    # El campo dm_token se almacena como "" (NOT NULL en SQLite) y la autorizacion
+    # se realiza directamente con el X-User-Token del usuario DM / superusuario.
     cur = db.execute(
         "INSERT INTO sessions "
         "(code, status, round, turn_combatant_id, dm_token, created_at, "
         " campaign_id, created_by_user_id) "
-        "VALUES (?, 'active', 1, NULL, ?, ?, ?, ?)",
-        (code, dm_token, now, campaign_id, dm_user_id),
+        "VALUES (?, 'active', 1, NULL, '', ?, ?, ?)",
+        (code, now, campaign_id, dm_user_id),
     )
     sid = cur.lastrowid
-    # El dm_token de esta sesion tambien vale como X-User-Token del DM.
-    ensure_user_session(db, dm_user_id, dm_token, now)
     return db.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
 
 

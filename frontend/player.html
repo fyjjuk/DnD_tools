@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jugador · Combate D&D 5e</title>
-<link rel="stylesheet" href="/static/app.css?v=2.4">
+<link rel="stylesheet" href="/static/app.css?v=2.4.2">
 </head>
 <body>
 
@@ -63,9 +63,21 @@
   </div>
 </div>
 
+<div id="check-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--panel);border:2px solid #0ea5e9;border-radius:12px;padding:24px;max-width:380px;width:100%;text-align:center">
+    <h2 id="check-modal-title" style="margin:0 0 8px;color:#0ea5e9">🎯 ¡Prueba de Habilidad!</h2>
+    <p id="check-modal-info" class="hp-text" style="margin-bottom:16px;white-space:pre-line"></p>
+    <div id="check-dice-display" style="font-size:3rem;margin:16px 0">🎲</div>
+    <div class="row-actions" style="justify-content:center;gap:12px">
+      <button id="btn-roll-check" type="button" class="primary" style="background:#0ea5e9;padding:12px 24px;font-size:1.1rem">¡Tirar!</button>
+    </div>
+    <p id="check-modal-result" class="hp-text" style="margin-top:12px;font-weight:bold"></p>
+  </div>
+</div>
+
 <div id="player-redirect" class="hidden">Redirigiendo…</div>
 
-<script src="/static/common.js?v=2.4"></script>
-<script src="/static/player.js?v=2.4"></script>
+<script src="/static/common.js?v=2.4.2"></script>
+<script src="/static/player.js?v=2.4.2"></script>
 </body>
 </html>
