@@ -71,8 +71,18 @@ function renderInitiativeTracker() {
     <div style="display:grid;gap:6px">
   `;
 
+  const sourceIcons = {
+    player: '<span class="tag" style="background:#065f46;color:#a7f3d0;font-size:10px;margin-left:6px" title="Tirado por jugador">🎲 Jugador</span>',
+    npc_auto: '<span class="tag" style="background:#374151;color:#d1d5db;font-size:10px;margin-left:6px" title="Auto-tirado por NPC">🤖 NPC</span>',
+    dm_force: '<span class="tag" style="background:#7c2d12;color:#fed7aa;font-size:10px;margin-left:6px" title="Forzado por DM">⚡ DM</span>',
+    dm_skip: '<span class="tag" style="background:#374151;color:#d1d5db;font-size:10px;margin-left:6px" title="Toma 10 por DM">⏭ DM</span>',
+    superuser_force: '<span class="tag" style="background:#581c87;color:#e9d5ff;font-size:10px;margin-left:6px" title="Forzado por Superusuario">👑 Admin</span>',
+    superuser_skip: '<span class="tag" style="background:#581c87;color:#e9d5ff;font-size:10px;margin-left:6px" title="Toma 10 por Superusuario">👑 Admin</span>',
+  };
+
   for (const r of req.rolls) {
     const isPending = r.status === "pending";
+    const badge = (!isPending && r.source && sourceIcons[r.source]) ? sourceIcons[r.source] : "";
     const statusLabel = r.status === "rolled"
       ? `<span style="color:#10b981">✓ Tiró: ${r.roll_value} + ${r.dex_mod} = <strong>${r.total}</strong></span>`
       : r.status === "forced"
@@ -86,6 +96,7 @@ function renderInitiativeTracker() {
         <div>
           <strong>${escapeHtml(r.combatant_name)}</strong>
           <span class="tag ${r.kind}" style="margin-left:6px">${r.kind === 'pc' ? 'PJ' : 'ENEMIGO'}</span>
+          ${badge}
           <span style="margin-left:10px">${statusLabel}</span>
         </div>
         ${isPending ? `

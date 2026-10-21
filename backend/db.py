@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS initiative_rolls (
     roll_value    INTEGER,
     total         INTEGER,
     status        TEXT NOT NULL DEFAULT 'pending',
+    source        TEXT NOT NULL DEFAULT 'unknown',
     rolled_at     TEXT,
     UNIQUE(request_id, combatant_id)
 );
@@ -390,6 +391,9 @@ def _migrate_v2_columns(conn):
     cols_users = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
     if "is_superuser" not in cols_users:
         conn.execute("ALTER TABLE users ADD COLUMN is_superuser INTEGER NOT NULL DEFAULT 0")
+    cols_rolls = {row[1] for row in conn.execute("PRAGMA table_info(initiative_rolls)")}
+    if "source" not in cols_rolls:
+        conn.execute("ALTER TABLE initiative_rolls ADD COLUMN source TEXT NOT NULL DEFAULT 'unknown'")
 
 
 def _connect():

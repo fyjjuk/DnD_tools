@@ -16,6 +16,8 @@ Cubre:
 12. Superusuario fuerza tirada de un jugador fuera de su campaña -> 200 OK + evento admin_action.
 13. Cancelación de request por cierre de sesión.
 14. Cache-busting ?v=2.4 en dm.html y player.html.
+15. Validación roll_value fuera de [1,20] devuelve 400 INVALID_ROLL y no altera iniciativa.
+16. Trazabilidad explícita de source en initiative_rolls (npc_auto, player, dm_force, dm_skip, superuser_force).
 
 NOTA DE COMPATIBILIDAD:
 Iniciativa interactiva requiere cuenta de campaña (v2). DM legacy
@@ -345,6 +347,126 @@ async def run_checks():
     assert "?v=2.4" in dm_html, "Falta ?v=2.4 en dm.html"
     assert "?v=2.4" in player_html, "Falta ?v=2.4 en player.html"
     print("[OK   ] 14. Cache-busting ?v=2.4 verificado en dm.html y player.html")
+
+    # 15. Validación roll_value fuera de [1,20] devuelve 400 INVALID_ROLL y no altera iniciativa
+    s2_code = f"S{secrets.token_hex(2).upper()}"
+    s2_dm_token = f"dm_tok_{secrets.token_hex(4)}"
+    with get_db() as db:
+        s2_cur = db.execute(
+            "INSERT INTO sessions (code, status, round, dm_token, campaign_id, created_by_user_id, created_at) "
+            "VALUES (?, 'active', 1, ?, ?, ?, datetime('now'))",
+            (s2_code, s2_dm_token, camp1_id, dm1_id),
+        )
+        s2_id = s2_cur.lastrowid
+        # Enemigo (dex_mod=1)
+        c_enemy2 = db.execute(
+            "INSERT INTO combatants (session_id, name, hp_max, hp_current, initiative, kind, dex_mod, created_at) "
+            "VALUES (?, 'Orco', 15, 15, 7, 'enemy', 1, datetime('now'))",
+            (s2_id,),
+        ).lastrowid
+        # Jugador 1 (dex_mod=2, iniciativa previa=5)
+        c_p1_s2 = db.execute(
+            "INSERT INTO combatants (session_id, name, hp_max, hp_current, initiative, kind, dex_mod, character_id, user_id, created_at) "
+            "VALUES (?, 'Guerrero 2', 25, 25, 5, 'pc', 2, ?, ?, datetime('now'))",
+            (s2_id, char1_id, p1_id),
+        ).lastrowid
+        # Jugador 2 (dex_mod=0)
+        c_p2_s2 = db.execute(
+            "INSERT INTO combatants (session_id, name, hp_max, hp_current, initiative, kind, dex_mod, user_id, created_at) "
+            "VALUES (?, 'Mago 2', 15, 15, 0, 'pc', 0, ?, datetime('now'))",
+            (s2_id, p2_id),
+        ).lastrowid
+
+    req4_res = await initiative_request_create(s2_id, x_user_token=dm1_token)
+    req4_id = req4_res["request_id"]
+
+    # Probar roll_value = 0 (menor a 1)
+    try:
+        await initiative_roll_submit(
+            InitiativeRollIn(request_id=req4_id, combatant_id=c_p1_s2, roll_value=0),
+            x_user_token=p1_token,
+        )
+        assert False, "Debió rechazar roll_value=0"
+    except ApiError as e:
+        assert e.status_code == 400
+        assert e.code == "INVALID_ROLL"
+
+    # Probar roll_value = 21 (mayor a 20)
+    try:
+        await initiative_roll_submit(
+            InitiativeRollIn(request_id=req4_id, combatant_id=c_p1_s2, roll_value=21),
+            x_user_token=p1_token,
+        )
+        assert False, "Debió rechazar roll_value=21"
+    except ApiError as e:
+        assert e.status_code == 400
+        assert e.code == "INVALID_ROLL"
+
+    # Verificar que la iniciativa del combatiente NO se modificó (sigue siendo 5) y la tirada sigue pending
+    with get_db() as db:
+        c_row = db.execute("SELECT initiative FROM combatants WHERE id=?", (c_p1_s2,)).fetchone()
+        assert c_row["initiative"] == 5
+        r_row = db.execute(
+            "SELECT status FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (req4_id, c_p1_s2),
+        ).fetchone()
+        assert r_row["status"] == "pending"
+    print("[OK   ] 15. Validación roll_value fuera de [1,20] devuelve 400 INVALID_ROLL y no altera iniciativa")
+
+    # 16. Trazabilidad explícita de source en initiative_rolls
+    # 16.1 Jugador 1 envía tirada válida -> source='player'
+    await initiative_roll_submit(
+        InitiativeRollIn(request_id=req4_id, combatant_id=c_p1_s2, roll_value=15),
+        x_user_token=p1_token,
+    )
+    # 16.2 DM fuerza la tirada del Jugador 2 -> source='dm_force'
+    await initiative_roll_force(
+        InitiativeActionIn(request_id=req4_id, combatant_id=c_p2_s2),
+        x_user_token=dm1_token,
+    )
+    # Verificaciones en DB de todas las fuentes
+    with get_db() as db:
+        # npc_auto: enemigo auto-tirado con user_id IS NULL
+        r_npc = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (req4_id, c_enemy2),
+        ).fetchone()
+        assert r_npc["source"] == "npc_auto"
+        assert r_npc["user_id"] is None
+        assert r_npc["status"] == "rolled"
+
+        # player: jugador 1
+        r_player = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (req4_id, c_p1_s2),
+        ).fetchone()
+        assert r_player["source"] == "player"
+        assert r_player["status"] == "rolled"
+
+        # dm_force: DM forzó la tirada
+        r_dm_force = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (req4_id, c_p2_s2),
+        ).fetchone()
+        assert r_dm_force["source"] == "dm_force"
+        assert r_dm_force["status"] == "forced"
+
+        # dm_skip: verificado de req_id / comb_p2_id (test 10)
+        r_dm_skip = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (req_id, comb_p2_id),
+        ).fetchone()
+        assert r_dm_skip["source"] == "dm_skip"
+        assert r_dm_skip["status"] == "skipped"
+
+        # superuser_force: verificado de req3_id / comb_p1_id (test 12)
+        r_su_force = db.execute(
+            "SELECT * FROM initiative_rolls WHERE request_id=? AND combatant_id=?",
+            (req3_id, comb_p1_id),
+        ).fetchone()
+        assert r_su_force["source"] == "superuser_force"
+        assert r_su_force["status"] == "forced"
+    print("[OK   ] 16. Trazabilidad explícita de source (npc_auto, player, dm_force, dm_skip, superuser_force)")
 
     print("\nTODAS LAS PRUEBAS DE LA FASE 2.4.1 COMPLETADAS CON ÉXITO")
 

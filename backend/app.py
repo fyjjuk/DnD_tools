@@ -176,6 +176,7 @@ def build_state(session, combatants, players, role, player_id):
                         "kind": r["kind"],
                         "user_id": r["user_id"],
                         "status": r["status"],
+                        "source": r["source"] if "source" in r.keys() else "unknown",
                         "dex_mod": r["dex_mod"],
                         "roll_value": r["roll_value"],
                         "total": r["total"],
@@ -2279,8 +2280,8 @@ async def initiative_request_create(
                 tot = r_val + d_mod
                 db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, c["id"]))
                 db.execute(
-                    "INSERT INTO initiative_rolls (request_id, session_id, combatant_id, user_id, dex_mod, roll_value, total, status, rolled_at) "
-                    "VALUES (?, ?, ?, NULL, ?, ?, ?, 'rolled', ?)",
+                    "INSERT INTO initiative_rolls (request_id, session_id, combatant_id, user_id, dex_mod, roll_value, total, status, source, rolled_at) "
+                    "VALUES (?, ?, ?, NULL, ?, ?, ?, 'rolled', 'npc_auto', ?)",
                     (req_id, session_id, c["id"], d_mod, r_val, tot, ts),
                 )
                 log_event(db, session_id, "roll", f"{c['name']} (enemigo) tiró iniciativa: {r_val} + {d_mod} = {tot}")
@@ -2304,8 +2305,8 @@ async def initiative_request_create(
                             uid = us_row["user_id"]
 
                 db.execute(
-                    "INSERT INTO initiative_rolls (request_id, session_id, combatant_id, user_id, dex_mod, roll_value, total, status, rolled_at) "
-                    "VALUES (?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL)",
+                    "INSERT INTO initiative_rolls (request_id, session_id, combatant_id, user_id, dex_mod, roll_value, total, status, source, rolled_at) "
+                    "VALUES (?, ?, ?, ?, ?, NULL, NULL, 'pending', 'unknown', NULL)",
                     (req_id, session_id, c["id"], uid, d_mod),
                 )
 
@@ -2379,7 +2380,7 @@ async def initiative_roll_submit(
         tot = payload.roll_value + d_mod
         ts = now()
         db.execute(
-            "UPDATE initiative_rolls SET roll_value=?, total=?, status='rolled', rolled_at=? WHERE id=?",
+            "UPDATE initiative_rolls SET roll_value=?, total=?, status='rolled', source='player', rolled_at=? WHERE id=?",
             (payload.roll_value, tot, ts, roll["id"]),
         )
         db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, payload.combatant_id))
@@ -2432,9 +2433,10 @@ async def initiative_roll_force(
         d_mod = roll["dex_mod"]
         tot = r_val + d_mod
         ts = now()
+        src = "superuser_force" if is_admin_override else "dm_force"
         db.execute(
-            "UPDATE initiative_rolls SET roll_value=?, total=?, status='forced', rolled_at=? WHERE id=?",
-            (r_val, tot, ts, roll["id"]),
+            "UPDATE initiative_rolls SET roll_value=?, total=?, status='forced', source=?, rolled_at=? WHERE id=?",
+            (r_val, tot, src, ts, roll["id"]),
         )
         db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, payload.combatant_id))
 
@@ -2489,9 +2491,10 @@ async def initiative_roll_skip(
         d_mod = roll["dex_mod"]
         tot = 10 + d_mod
         ts = now()
+        src = "superuser_skip" if is_admin_override else "dm_skip"
         db.execute(
-            "UPDATE initiative_rolls SET roll_value=10, total=?, status='skipped', rolled_at=? WHERE id=?",
-            (tot, ts, roll["id"]),
+            "UPDATE initiative_rolls SET roll_value=10, total=?, status='skipped', source=?, rolled_at=? WHERE id=?",
+            (tot, src, ts, roll["id"]),
         )
         db.execute("UPDATE combatants SET initiative=? WHERE id=?", (tot, payload.combatant_id))
 
