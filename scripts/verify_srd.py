@@ -149,11 +149,61 @@ def main() -> int:
 
     results.append(check("7. Aboleth STR..CHA", q7))
 
-    # 8-11: no aplican (spells / equipment / levels no importados en Fase 1)
-    print("[SKIP ] 8. Fireball (spells no importado)")
-    print("[SKIP ] 9. Longsword (equipment no importado)")
-    print("[SKIP ] 10. Cross-check damage_type (equipment no importado)")
-    print("[SKIP ] 11. Fighter niveles (levels no importado)")
+    # 8. Fireball (spells)
+    def q8():
+        r = conn.execute(
+            "SELECT name, level, school_slug, concentration, ritual "
+            "FROM spells WHERE index_slug='fireball'"
+        ).fetchone()
+        if r is None:
+            return False, "no hay fila para 'fireball'"
+        ok = (r["level"] == 3 and r["school_slug"] == "evocation" and r["concentration"] == 0 and r["ritual"] == 0)
+        return ok, f"{r['name']} level={r['level']} school={r['school_slug']} conc={r['concentration']}"
+
+    results.append(check("8. Fireball (spells)", q8))
+
+    # 9. Longsword (equipment)
+    def q9():
+        r = conn.execute(
+            "SELECT name, damage_dice, damage_type_slug, cost_quantity, cost_unit, cost_unit_raw "
+            "FROM equipment WHERE index_slug='longsword'"
+        ).fetchone()
+        if r is None:
+            return False, "no hay fila para 'longsword'"
+        ok = (r["damage_dice"] == "1d8" and r["damage_type_slug"] == "slashing" and r["cost_quantity"] == 15 and r["cost_unit"] == "gp" and r["cost_unit_raw"] == "po")
+        return ok, f"{r['name']} dmg={r['damage_dice']} type={r['damage_type_slug']} cost={r['cost_quantity']}{r['cost_unit']}"
+
+    results.append(check("9. Longsword (equipment)", q9))
+
+    # 10. Cross-check damage_type
+    def q10():
+        bad = conn.execute(
+            """
+            SELECT DISTINCT e.damage_type_slug FROM equipment e
+            WHERE e.damage_type_slug IS NOT NULL
+              AND e.damage_type_slug NOT IN (
+                SELECT r.index_slug FROM reference_entries r
+                JOIN collections c ON c.id = r.collection_id
+                WHERE c.slug = 'damage-types'
+              )
+            """
+        ).fetchall()
+        ok = len(bad) == 0
+        return ok, f"{len(bad)} damage_type_slugs huerfanos: {[b[0] for b in bad]}"
+
+    results.append(check("10. Cross-check damage_type (equipment -> reference_entries)", q10))
+
+    # 11. Fighter niveles (levels)
+    def q11():
+        rows = conn.execute(
+            "SELECT level, prof_bonus FROM levels WHERE class_slug='fighter' AND level IN (1, 20) ORDER BY level"
+        ).fetchall()
+        if len(rows) != 2:
+            return False, f"esperadas 2 filas, encontradas {len(rows)}"
+        ok = (rows[0]["prof_bonus"] == 2 and rows[1]["prof_bonus"] == 6)
+        return ok, f"nivel 1 pb={rows[0]['prof_bonus']}, nivel 20 pb={rows[1]['prof_bonus']}"
+
+    results.append(check("11. Fighter niveles 1 y 20 (levels)", q11))
 
     # 12. import_meta monsters
     def q12():
@@ -228,6 +278,31 @@ def main() -> int:
         return bool(ok), f"primera accion goblin={r['first_action'] if r else None}"
 
     results.append(check("16. actions_json de goblin contiene JSON valido", q16))
+
+    # 17. Conteos exactos de todas las tablas en Fase 2.2
+    def q17():
+        counts = {
+            "monsters": conn.execute("SELECT COUNT(*) FROM monsters").fetchone()[0],
+            "equipment": conn.execute("SELECT COUNT(*) FROM equipment").fetchone()[0],
+            "classes": conn.execute("SELECT COUNT(*) FROM classes").fetchone()[0],
+            "levels": conn.execute("SELECT COUNT(*) FROM levels").fetchone()[0],
+            "races": conn.execute("SELECT COUNT(*) FROM races").fetchone()[0],
+            "spells": conn.execute("SELECT COUNT(*) FROM spells").fetchone()[0],
+            "reference_entries": conn.execute("SELECT COUNT(*) FROM reference_entries").fetchone()[0],
+        }
+        expected = {
+            "monsters": 334,
+            "equipment": 237,
+            "classes": 12,
+            "levels": 290,
+            "races": 9,
+            "spells": 319,
+            "reference_entries": 227,
+        }
+        ok = counts == expected
+        return ok, f"counts={counts}"
+
+    results.append(check("17. Conteos exactos Fase 2.2 de todas las tablas", q17))
 
     conn.close()
 

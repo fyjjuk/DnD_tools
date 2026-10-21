@@ -221,6 +221,85 @@ CREATE TABLE IF NOT EXISTS reference_entries (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ref_coll_slug ON reference_entries(collection_id, index_slug);
 CREATE INDEX IF NOT EXISTS idx_ref_coll ON reference_entries(collection_id);
+
+CREATE TABLE IF NOT EXISTS levels (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL REFERENCES collections(id),
+    index_slug    TEXT NOT NULL UNIQUE,
+    class_slug    TEXT NOT NULL,
+    subclass_slug TEXT,
+    level         INTEGER NOT NULL,
+    prof_bonus    INTEGER,
+    data          TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_levels_class_subclass_level ON levels(class_slug, coalesce(subclass_slug, ''), level);
+CREATE INDEX IF NOT EXISTS idx_levels_class ON levels(class_slug);
+
+CREATE TABLE IF NOT EXISTS spells (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id    INTEGER NOT NULL REFERENCES collections(id),
+    index_slug       TEXT NOT NULL UNIQUE,
+    name             TEXT NOT NULL,
+    level            INTEGER NOT NULL,
+    school_slug      TEXT,
+    casting_time     TEXT,
+    range            TEXT,
+    duration         TEXT,
+    concentration    INTEGER NOT NULL DEFAULT 0,
+    ritual           INTEGER NOT NULL DEFAULT 0,
+    components       TEXT,
+    attack_type      TEXT,
+    data             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_spells_level  ON spells(level);
+CREATE INDEX IF NOT EXISTS idx_spells_school ON spells(school_slug);
+CREATE INDEX IF NOT EXISTS idx_spells_name   ON spells(name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS equipment (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id            INTEGER NOT NULL REFERENCES collections(id),
+    index_slug               TEXT NOT NULL UNIQUE,
+    name                     TEXT NOT NULL,
+    equipment_category_slug  TEXT,
+    weapon_category          TEXT,
+    armor_category           TEXT,
+    cost_quantity            REAL,
+    cost_unit                TEXT,
+    cost_unit_raw            TEXT,
+    weight                   REAL,
+    damage_dice              TEXT,
+    damage_type_slug         TEXT,
+    armor_class_base         INTEGER,
+    armor_class_dex_bonus    INTEGER,
+    armor_class_max_bonus    INTEGER,
+    data                     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_equip_cat    ON equipment(equipment_category_slug);
+CREATE INDEX IF NOT EXISTS idx_equip_weapon ON equipment(weapon_category);
+CREATE INDEX IF NOT EXISTS idx_equip_armor  ON equipment(armor_category);
+CREATE INDEX IF NOT EXISTS idx_equip_name   ON equipment(name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS classes (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id             INTEGER NOT NULL REFERENCES collections(id),
+    index_slug                TEXT NOT NULL UNIQUE,
+    name                      TEXT NOT NULL,
+    hit_die                   INTEGER,
+    spellcasting_ability_slug TEXT,
+    data                      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_classes_name ON classes(name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS races (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL REFERENCES collections(id),
+    index_slug    TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    speed         INTEGER,
+    size          TEXT,
+    data          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_races_name ON races(name COLLATE NOCASE);
 """
 
 SCHEMA_HOMEBREW = """

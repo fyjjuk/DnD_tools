@@ -736,19 +736,22 @@ async def srd_monsters(
 ALLOWED_REF_COLLECTIONS = {
     "conditions": "5e-SRD-Conditions.json",
     "damage-types": "5e-SRD-Damage-Types.json",
+    "ability-scores": "5e-SRD-Ability-Scores.json",
+    "skills": "5e-SRD-Skills.json",
+    "equipment-categories": "5e-SRD-Equipment-Categories.json",
+    "proficiencies": "5e-SRD-Proficiencies.json",
+    "weapon-properties": "5e-SRD-Weapon-Properties.json",
+    "magic-schools": "5e-SRD-Magic-Schools.json",
 }
 
 
 @app.get("/api/srd/refs/{collection}")
 async def srd_refs(collection: str):
-    """Devuelve una lista con index y name de la colección solicitada.
-
-    Solo acepta 'conditions' y 'damage-types' (404 para otras colecciones).
-    """
+    """Devuelve una lista con index y name de la colección solicitada."""
     if collection not in ALLOWED_REF_COLLECTIONS:
         raise HTTPException(
             status_code=404,
-            detail=f"Colección '{collection}' no encontrada. Solo se aceptan 'conditions' y 'damage-types'."
+            detail=f"Colección '{collection}' no encontrada en referencias SRD."
         )
 
     items = []
@@ -782,6 +785,351 @@ async def srd_refs(collection: str):
                 pass
 
     return items
+
+
+@app.get("/api/srd/skills")
+async def srd_skills():
+    """Lista de habilidades con su característica asociada."""
+    try:
+        with get_srd_db() as db:
+            rows = db.execute(
+                """
+                SELECT r.index_slug AS "index", r.name, r.data
+                FROM reference_entries r
+                JOIN collections c ON c.id = r.collection_id
+                WHERE c.slug = 'skills'
+                ORDER BY r.name COLLATE NOCASE
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"items": []}
+
+    items = []
+    for r in rows:
+        d = json.loads(r["data"]) if r["data"] else {}
+        ability = d.get("ability_score", {}).get("index")
+        items.append({
+            "index": r["index"],
+            "name": r["name"],
+            "ability_score": ability,
+        })
+    return {"items": items}
+
+
+@app.get("/api/srd/equipment")
+async def srd_equipment(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    weapon_category: Optional[str] = None,
+    armor_category: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Catálogo de equipo y armas SRD con filtros y paginación."""
+    limit = max(1, min(int(limit), 250))
+    offset = max(0, int(offset))
+
+    where_sql = " FROM equipment WHERE 1=1"
+    params: list = []
+    if q:
+        where_sql += " AND (name LIKE ? OR index_slug LIKE ?)"
+        params += [f"%{q}%", f"%{q}%"]
+    if category:
+        where_sql += " AND equipment_category_slug = ?"
+        params.append(category)
+    if weapon_category:
+        where_sql += " AND weapon_category = ?"
+        params.append(weapon_category)
+    if armor_category:
+        where_sql += " AND armor_category = ?"
+        params.append(armor_category)
+
+    try:
+        with get_srd_db() as db:
+            total = db.execute("SELECT COUNT(*)" + where_sql, params).fetchone()[0]
+            select_sql = (
+                "SELECT index_slug, name, equipment_category_slug, weapon_category, armor_category, "
+                "       cost_quantity, cost_unit, cost_unit_raw, weight, damage_dice, damage_type_slug, "
+                "       armor_class_base, armor_class_dex_bonus, armor_class_max_bonus "
+                + where_sql
+                + " ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?"
+            )
+            rows = db.execute(select_sql, params + [limit, offset]).fetchall()
+    except sqlite3.OperationalError:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    return {
+        "items": [
+            {
+                "index": r["index_slug"],
+                "name": r["name"],
+                "category": r["equipment_category_slug"],
+                "weapon_category": r["weapon_category"],
+                "armor_category": r["armor_category"],
+                "cost_quantity": r["cost_quantity"],
+                "cost_unit": r["cost_unit"],
+                "cost_unit_raw": r["cost_unit_raw"],
+                "weight": r["weight"],
+                "damage_dice": r["damage_dice"],
+                "damage_type": r["damage_type_slug"],
+                "armor_class_base": r["armor_class_base"],
+                "armor_class_dex_bonus": r["armor_class_dex_bonus"],
+                "armor_class_max_bonus": r["armor_class_max_bonus"],
+            }
+            for r in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/srd/equipment/{index}")
+async def srd_equipment_item(index: str):
+    """Detalle completo de un objeto de equipo."""
+    try:
+        with get_srd_db() as db:
+            row = db.execute(
+                "SELECT data FROM equipment WHERE index_slug = ?", (index,)
+            ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    return json.loads(row["data"])
+
+
+@app.get("/api/srd/classes")
+async def srd_classes(q: Optional[str] = None):
+    """Lista de clases de personaje SRD."""
+    where_sql = " FROM classes WHERE 1=1"
+    params: list = []
+    if q:
+        where_sql += " AND (name LIKE ? OR index_slug LIKE ?)"
+        params += [f"%{q}%", f"%{q}%"]
+
+    try:
+        with get_srd_db() as db:
+            rows = db.execute(
+                "SELECT index_slug, name, hit_die, spellcasting_ability_slug "
+                + where_sql
+                + " ORDER BY name COLLATE NOCASE",
+                params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"items": []}
+
+    return {
+        "items": [
+            {
+                "index": r["index_slug"],
+                "name": r["name"],
+                "hit_die": r["hit_die"],
+                "spellcasting_ability": r["spellcasting_ability_slug"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/srd/classes/{index}")
+async def srd_class_detail(index: str):
+    """Detalle completo de una clase."""
+    try:
+        with get_srd_db() as db:
+            row = db.execute(
+                "SELECT data FROM classes WHERE index_slug = ?", (index,)
+            ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    return json.loads(row["data"])
+
+
+@app.get("/api/srd/classes/{index}/levels")
+async def srd_class_levels(
+    index: str,
+    from_level: Optional[int] = None,
+    to_level: Optional[int] = None,
+    subclass: Optional[str] = None,
+):
+    """Progresión de niveles de una clase (1 a 20)."""
+    where_sql = " FROM levels WHERE class_slug = ?"
+    params: list = [index]
+    if from_level is not None:
+        where_sql += " AND level >= ?"
+        params.append(from_level)
+    if to_level is not None:
+        where_sql += " AND level <= ?"
+        params.append(to_level)
+    if subclass is not None:
+        where_sql += " AND (subclass_slug = ? OR subclass_slug IS NULL)"
+        params.append(subclass)
+    else:
+        where_sql += " AND subclass_slug IS NULL"
+
+    try:
+        with get_srd_db() as db:
+            rows = db.execute(
+                "SELECT index_slug, class_slug, subclass_slug, level, prof_bonus, data "
+                + where_sql
+                + " ORDER BY level ASC",
+                params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"items": []}
+
+    items = []
+    for r in rows:
+        d = json.loads(r["data"]) if r["data"] else {}
+        items.append({
+            "index": r["index_slug"],
+            "class": r["class_slug"],
+            "subclass": r["subclass_slug"],
+            "level": r["level"],
+            "prof_bonus": r["prof_bonus"],
+            "spellcasting": d.get("spellcasting"),
+            "features": d.get("features", []),
+            "class_specific": d.get("class_specific"),
+        })
+
+    return {"items": items}
+
+
+@app.get("/api/srd/races")
+async def srd_races(q: Optional[str] = None):
+    """Lista de razas de personaje SRD."""
+    where_sql = " FROM races WHERE 1=1"
+    params: list = []
+    if q:
+        where_sql += " AND (name LIKE ? OR index_slug LIKE ?)"
+        params += [f"%{q}%", f"%{q}%"]
+
+    try:
+        with get_srd_db() as db:
+            rows = db.execute(
+                "SELECT index_slug, name, speed, size "
+                + where_sql
+                + " ORDER BY name COLLATE NOCASE",
+                params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"items": []}
+
+    return {
+        "items": [
+            {
+                "index": r["index_slug"],
+                "name": r["name"],
+                "speed": r["speed"],
+                "size": r["size"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/srd/races/{index}")
+async def srd_race_detail(index: str):
+    """Detalle completo de una raza."""
+    try:
+        with get_srd_db() as db:
+            row = db.execute(
+                "SELECT data FROM races WHERE index_slug = ?", (index,)
+            ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        raise HTTPException(status_code=404, detail="Raza no encontrada")
+    return json.loads(row["data"])
+
+
+@app.get("/api/srd/spells")
+async def srd_spells(
+    q: Optional[str] = None,
+    level: Optional[int] = None,
+    school: Optional[str] = None,
+    class_slug: Optional[str] = None,
+    concentration: Optional[int] = None,
+    ritual: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Catálogo de conjuros SRD con filtros y paginación."""
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+
+    where_sql = " FROM spells WHERE 1=1"
+    params: list = []
+    if q:
+        where_sql += " AND (name LIKE ? OR index_slug LIKE ?)"
+        params += [f"%{q}%", f"%{q}%"]
+    if level is not None:
+        where_sql += " AND level = ?"
+        params.append(level)
+    if school:
+        where_sql += " AND school_slug = ?"
+        params.append(school)
+    if concentration is not None:
+        where_sql += " AND concentration = ?"
+        params.append(1 if concentration else 0)
+    if ritual is not None:
+        where_sql += " AND ritual = ?"
+        params.append(1 if ritual else 0)
+    if class_slug:
+        where_sql += " AND data LIKE ?"
+        params.append(f'%"index": "{class_slug}"%')
+
+    try:
+        with get_srd_db() as db:
+            total = db.execute("SELECT COUNT(*)" + where_sql, params).fetchone()[0]
+            select_sql = (
+                "SELECT index_slug, name, level, school_slug, casting_time, range, duration, "
+                "       concentration, ritual, components, attack_type "
+                + where_sql
+                + " ORDER BY level ASC, name COLLATE NOCASE LIMIT ? OFFSET ?"
+            )
+            rows = db.execute(select_sql, params + [limit, offset]).fetchall()
+    except sqlite3.OperationalError:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    return {
+        "items": [
+            {
+                "index": r["index_slug"],
+                "name": r["name"],
+                "level": r["level"],
+                "school": r["school_slug"],
+                "casting_time": r["casting_time"],
+                "range": r["range"],
+                "duration": r["duration"],
+                "concentration": bool(r["concentration"]),
+                "ritual": bool(r["ritual"]),
+                "components": r["components"],
+                "attack_type": r["attack_type"],
+            }
+            for r in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/srd/spells/{index}")
+async def srd_spell_detail(index: str):
+    """Detalle completo de un conjuro."""
+    try:
+        with get_srd_db() as db:
+            row = db.execute(
+                "SELECT data FROM spells WHERE index_slug = ?", (index,)
+            ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conjuro no encontrado")
+    return json.loads(row["data"])
 
 
 @app.get("/api/srd/monsters/{index}")
